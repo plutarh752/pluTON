@@ -1,0 +1,49 @@
+# Локальная оркестрация: postgres + web (Next.js) + worker (скан-джоба).
+# Требует установленного Docker Desktop. Для быстрой разработки можно поднять только `db`
+# (docker compose up db) и гонять web/worker через `npm run dev` / `npm run worker:scan`.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pluton
+      POSTGRES_PASSWORD: pluton
+      POSTGRES_DB: pluton
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pluton"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run start
+    environment:
+      DATABASE_URL: postgresql://pluton:pluton@db:5432/pluton?schema=public
+      TONAPI_BASE_URL: https://tonapi.io/v2
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run worker:scan
+    environment:
+      DATABASE_URL: postgresql://pluton:pluton@db:5432/pluton?schema=public
+      TONAPI_BASE_URL: https://tonapi.io/v2
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

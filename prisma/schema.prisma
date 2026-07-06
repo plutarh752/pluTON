@@ -1,0 +1,247 @@
+// PluTON — схема БД с дельта-хранением (см. план §3 / §3.1).
+// Источник данных — только tonapi (on-chain, цены в TON). Валюто-агностично на будущее (Stars V2).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"] // Neon HTTP/WSS адаптер (обход блокировки 5432, паттерн для serverless)
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── enums ───────────────────────────
+
+enum ScanStatus {
+  running
+  success
+  failed
+  partial // tonapi частично недоступен / не все коллекции обошли
+}
+
+enum ListingStatus {
+  active
+  sold
+  delisted
+  insufficient_data // мало данных для expected_price → не показываем в Deal Finder
+}
+
+enum BasePriceSource {
+  sales_7d
+  sales_30d
+  listings_p25
+  insufficient_data
+}
+
+enum ListingEventType {
+  new
+  price_up
+  price_down
+  delisted
+  sold
+  reappeared
+}
+
+// Уверенность в продаже. В MVP пишем только `inferred` (кросс-скан дельты, §3.1).
+// `confirmed` зарезервировано под будущий надёжный источник — НЕ смешиваем молча.
+enum SaleConfidence {
+  inferred
+  confirmed
+}
+
+enum PriceKind {
+  ask_eq_fill // fixed-price: ask == fill, цена точна
+  ask_upper_bound // аукцион: ask — верхняя граница (в медианы не берём)
+  exact // подтверждённая цена сделки
+}
+
+// ─────────────────────────── models ───────────────────────────
+
+// Настройки: курсы, комиссии, cooldown, веса осей, watchlist, пороги, ключ tonapi.
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model Collection {
+  id          Int      @id @default(autoincrement())
+  address     String   @unique
+  slug        String?  @unique
+  name        String
+  modelName   String?
+  totalSupply Int? // = число items из tonapi (next_item_index = -1, стандартного счётчика нет)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  nftItems          NftItem[]
+  listings          Listing[]
+  sales             Sale[]
+  attributeRarities AttributeRarity[]
+  listingEvents     ListingEvent[]
+  dailyAggregates   DailyCollectionAggregate[]
+}
+
+model NftItem {
+  id           Int      @id @default(autoincrement())
+  collectionId Int
+  address      String   @unique
+  name         String?
+  index        String? // huge signed значения tonapi → храним строкой
+  attributes   Json? // [{trait_type, value}] — оси generic (Model/Backdrop/Symbol сегодня)
+  imageUrl     String?
+  ownerAddress String? // нужен для inferSales (sold vs delisted), §3.1
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+
+  collection    Collection     @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  listings      Listing[]
+  sales         Sale[]
+  listingEvents ListingEvent[]
+
+  @@index([collectionId])
+}
+
+// Редкость: считаем сами по распределению значений в коллекции (tonapi rarity не даёт).
+model AttributeRarity {
+  id           Int      @id @default(autoincrement())
+  collectionId Int
+  traitType    String
+  value        String
+  count        Int
+  rarityPct    Float
+  updatedAt    DateTime @updatedAt
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, traitType, value])
+  @@index([collectionId])
+}
+
+// Прогон скана: анкер для дельт (Screen 3) и история 20 (Screen 1).
+model Scan {
+  id                   Int        @id @default(autoincrement())
+  startedAt            DateTime   @default(now())
+  finishedAt           DateTime?
+  status               ScanStatus @default(running)
+  trigger              String?
+  scannedCollectionIds Int[] // чтобы не «делистить» коллекции, которые не трогали в этот скан
+  numListingsSeen      Int?
+  numNew               Int?
+  numChanged           Int?
+  numGone              Int?
+  error                String?
+  durationMs           Int?
+
+  listingEvents ListingEvent[]
+
+  @@index([startedAt])
+}
+
+// Канонический «текущий стейт» лота (одна строка на NFT-item; история — в listing_events).
+model Listing {
+  id                  Int              @id @default(autoincrement())
+  nftItemId           Int              @unique
+  collectionId        Int
+  marketplace         String?
+  marketplaceUrl      String?
+  currency            String           @default("TON")
+  priceAmount         Decimal?         @db.Decimal(38, 9)
+  priceUsdNet         Decimal?         @db.Decimal(20, 2)
+  expectedPriceAmount Decimal?         @db.Decimal(38, 9)
+  expectedPriceUsdNet Decimal?         @db.Decimal(20, 2)
+  undervaluationPct   Float?
+  liquidityFactor     Float?
+  freshnessFactor     Float?
+  confidence          Float?
+  basePriceSource     BasePriceSource?
+  dealScore           Float?
+  status              ListingStatus    @default(active)
+  sellerAddress       String? // = sale.owner (продавец в эскроу); нужен для sold vs delisted
+  listedAt            DateTime?
+  priceUpdatedAt      DateTime?
+  firstSeenScanId     Int?
+  lastSeenScanId      Int?
+  firstSeenAt         DateTime         @default(now())
+  lastSeenAt          DateTime         @default(now())
+
+  nftItem       NftItem        @relation(fields: [nftItemId], references: [id], onDelete: Cascade)
+  collection    Collection     @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  listingEvents ListingEvent[]
+
+  @@index([collectionId])
+  @@index([dealScore])
+  @@index([status])
+  @@index([priceUsdNet])
+}
+
+// Append-only лог дельт — питает Screen 3 (Scan Diff) и произвольные диффы A→B.
+model ListingEvent {
+  id               Int              @id @default(autoincrement())
+  scanId           Int
+  listingId        Int?
+  nftItemId        Int
+  collectionId     Int
+  eventType        ListingEventType
+  oldPriceAmount   Decimal?         @db.Decimal(38, 9)
+  newPriceAmount   Decimal?         @db.Decimal(38, 9)
+  oldPriceUsdNet   Decimal?         @db.Decimal(20, 2)
+  newPriceUsdNet   Decimal?         @db.Decimal(20, 2)
+  priceDeltaPct    Float?
+  dealScoreAtEvent Float?
+  createdAt        DateTime         @default(now())
+
+  scan       Scan       @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  listing    Listing?   @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  nftItem    NftItem    @relation(fields: [nftItemId], references: [id], onDelete: Cascade)
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@index([scanId, eventType])
+  @@index([nftItemId, createdAt])
+}
+
+// Вменённые продажи (§3.1). price — ask последней активной цены; для fixed-price ask == fill.
+model Sale {
+  id             Int            @id @default(autoincrement())
+  collectionId   Int
+  nftItemId      Int
+  currency       String         @default("TON")
+  priceAmount    Decimal?       @db.Decimal(38, 9)
+  priceUsdNet    Decimal?       @db.Decimal(20, 2)
+  seller         String?
+  buyer          String?
+  soldAt         DateTime
+  source         String? // как получена продажа (напр. "cross-scan-delta")
+  confidence     SaleConfidence @default(inferred)
+  priceKind      PriceKind?
+  detectedScanId Int? // скан, где заметили исчезновение (продажу)
+  prevScanId     Int? // предыдущий скан, где лот был active
+  createdAt      DateTime       @default(now())
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  nftItem    NftItem    @relation(fields: [nftItemId], references: [id], onDelete: Cascade)
+
+  @@unique([nftItemId, detectedScanId]) // дедуп вменённой продажи
+  @@index([collectionId, soldAt])
+  @@index([nftItemId, soldAt])
+  @@index([confidence])
+}
+
+// 24h-ролап для трендов/floor-истории (Screen 4).
+model DailyCollectionAggregate {
+  id              Int      @id @default(autoincrement())
+  collectionId    Int
+  day             DateTime @db.Date
+  floorAmount     Decimal? @db.Decimal(38, 9)
+  floorUsdNet     Decimal? @db.Decimal(20, 2)
+  listingsCount   Int?
+  salesCount24h   Int?
+  volume24hUsdNet Decimal? @db.Decimal(20, 2)
+  medianPrice     Decimal? @db.Decimal(38, 9)
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, day])
+}
