@@ -41,7 +41,8 @@ DATABASE_URL=... npm run db:seed   # settings + watchlist (идемпотент�
 
 1. New Project → Deploy from GitHub repo (этот репозиторий).
 2. Railway подхватит `railway.json`:
-   - build: `npm ci --include=dev` (ставит tsx + `postinstall` генерит Prisma client),
+   - build: `npm install --include=dev` (ставит tsx + `postinstall` генерит Prisma client;
+     `npm install`, а не `npm ci` — последний конфликтует с cache-mount Nixpacks на `node_modules/.cache` → EBUSY),
    - start: `npm run worker:server`,
    - healthcheck: `/health`.
 3. Variables:
