@@ -39,6 +39,11 @@
    маркетов, floor) выводится из tonapi. Клиент: `src/lib/tonapi.ts` — 1 RPS throttle, пагинация
    `limit=1000`, **дедуп по адресу** (offset-пагинация на больших коллекциях отдаёт дубли — ловили
    «Unique constraint failed on nftItemId»). Цены on-chain в **TON** (token «Gram», decimals 9).
+   - **Адреса предметов из tonapi — raw (`0:hex`); в любой marketplace_url конвертируй в friendly
+     (`EQ…`) через `toFriendlyAddress` (`src/lib/address.ts`, `@ton/core`).** Getgems не резолвит
+     raw в ссылке — открывается пустая страница (ловили: коллекция была friendly из watchlist, а item
+     raw из tonapi → рассинхрон в одном URL). NFT — контракты → **bounceable (EQ, не UQ)**. **Не
+     подставляй `nftItem.address` в URL напрямую.**
 
 3. **Скоринг = ранг/перцентиль редкости, НЕ `100/rarity_pct`.** `expected = base × (1 + Σ w_i × s_i)`,
    где `s_i` = доля предметов с более частым значением на оси (`computeRarityRank` → `expectedPriceTon`

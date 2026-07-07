@@ -23,6 +23,7 @@ import {
 } from "../src/lib/scoring";
 import { inferSales, type CurrentItemState } from "./inferSales";
 import { upsertItems, upsertRarity, getItemIdMap } from "./persist";
+import { toFriendlyAddress } from "../src/lib/address";
 
 async function loadSettings() {
   const rows = await prisma.setting.findMany();
@@ -32,7 +33,8 @@ async function loadSettings() {
 }
 
 function getgemsUrl(collectionAddr: string, itemAddr: string) {
-  return `https://getgems.io/collection/${collectionAddr}/${itemAddr}`;
+  // itemAddr из tonapi — raw (`0:hex`); getgems резолвит только friendly (EQ…). См. src/lib/address.ts.
+  return `https://getgems.io/collection/${collectionAddr}/${toFriendlyAddress(itemAddr)}`;
 }
 
 async function main() {
