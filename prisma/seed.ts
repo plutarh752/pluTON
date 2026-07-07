@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+// Идём в Neon через тот же driver adapter (HTTP/443), что и веб/воркер —
+// прямой TCP 5432 на этой машине заблокирован (инвариант #1, ловили P1017/P1001).
+import { prisma } from "../src/lib/db";
 
 // Начальные настройки. Всё редактируется в Settings (Экран 5).
 // Веса осей: у Telegram-подарков оси Model/Backdrop/Symbol (не 4 — «Number» это mint-id, см. план §0).
