@@ -1,36 +1,50 @@
-// Бизнес-правило: цена ВСЕГДА показывается парой «валюта + $net». Голых сумм нет нигде.
-// Единственный форматтер цен в приложении — использовать только его.
-
-export type Currency = "TON" | "STARS";
-
-const SYMBOL: Record<Currency, string> = {
-  TON: "💎",
-  STARS: "⭐",
-};
-
-function fmtAmount(n: number): string {
-  // без лишних дробей: 5100, 7.9, 17.35
-  if (Number.isInteger(n)) return n.toLocaleString("en-US");
-  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-}
+// PluTON v2: единственный форматтер цен — покупательская тройка TON + ⭐Stars + ~$ (gross).
+// Это ASK-цена на ПОКУПКУ, поэтому $ = gross (цена × курс), БЕЗ net-семантики (комиссия продажи не при чём).
+// Голых значений в UI нет: TON всегда в паре хотя бы с одним эквивалентом.
 
 function fmtUsd(n: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 }
 
-/**
- * Пара «валюта + чистый USD». Пример: "💎 5100 (~$9,078.00 net)".
- * usdNet должен приходить уже посчитанным на бэке (после комиссий/конвертации).
- */
-export function formatPricePair(amount: number, currency: Currency, usdNet: number): string {
-  return `${SYMBOL[currency]} ${fmtAmount(amount)} (~$${fmtUsd(usdNet)} net)`;
+export interface Rates {
+  ton_usd: number;
+  stars_usd: number;
 }
 
-/** Структурированный вариант — для компонента PricePair, когда нужны части отдельно. */
-export function pricePairParts(amount: number, currency: Currency, usdNet: number) {
+/** Валовый USD-эквивалент цены в TON (для покупателя). */
+export function tonToUsd(priceTon: number, r: Rates): number {
+  return priceTon * (r.ton_usd || 0);
+}
+
+/** Эквивалент цены в Telegram Stars: (TON → USD) / stars_usd. */
+export function tonToStars(priceTon: number, r: Rates): number {
+  if (!r.stars_usd) return 0;
+  return (priceTon * (r.ton_usd || 0)) / r.stars_usd;
+}
+
+function fmtTon(n: number): string {
+  // как в дизайне: всегда 2 знака (125.00, 140.20)
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtStars(n: number): string {
+  return Math.round(n).toLocaleString("en-US");
+}
+
+/** Отформатированные части покупательской цены. Принимает уже посчитанные raw-значения (снапшот прогона). */
+export function formatBuyPriceParts(
+  tonRaw: number,
+  starsRaw: number | null | undefined,
+  usdRaw: number | null | undefined
+) {
   return {
-    symbol: SYMBOL[currency],
-    amount: fmtAmount(amount),
-    usdNet: `$${fmtUsd(usdNet)} net`,
+    ton: fmtTon(tonRaw),
+    stars: starsRaw != null ? `⭐ ${fmtStars(starsRaw)}` : null,
+    usd: usdRaw != null ? `~$${fmtUsd(usdRaw)}` : null,
   };
+}
+
+/** Отформатировать `% отклонения от floor`: "-12.3%" / "+4.0%". */
+export function formatFloorDeviation(pct: number): string {
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
 }

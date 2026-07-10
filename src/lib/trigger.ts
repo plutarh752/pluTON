@@ -6,11 +6,11 @@ import { spawn } from "node:child_process";
 //      лишь по кнопке «Скан»).
 //   • ЛОКАЛЬНО: spawn отдельного процесса (Vercel-serverless в проде не держит долгий скан,
 //     поэтому там воркер живёт на Railway).
-export type Job = "scan" | "rescore";
+export type Job = "scan" | "prices";
 
 const SCRIPT: Record<Job, string> = {
   scan: "worker/scan.ts",
-  rescore: "worker/rescore.ts",
+  prices: "worker/prices.ts",
 };
 
 /** Возвращает true, если триггер принят (202) или воркер уже занят (409 — это не ошибка вызова). */

@@ -15,17 +15,10 @@ const SETTINGS: Record<string, unknown> = {
     tg_commission: 0.8, // комиссия Telegram (V2, Stars)
   },
   scan: {
-    cooldown_minutes: 15,
+    cooldown_minutes: 15, // legacy tonapi-скан
   },
-  weights: {
-    Backdrop: 0.5,
-    Symbol: 0.3,
-    Model: 0.2,
-  },
-  thresholds: {
-    min_sales_7d: 10, // >= → base_price = median(sales 7d)
-    min_sales_30d: 5, // иначе >= → base_price = median(sales 30d)
-    min_listings_for_p25: 5, // иначе >= → base_price = p25(активных листингов); иначе insufficient_data
+  prices: {
+    cooldown_minutes: 3, // кнопка «Получить цены» (gift-satellite) — лёгкая частая операция
   },
   tonapi: {
     api_key: "", // free tier (1 RPS) ключа не требует

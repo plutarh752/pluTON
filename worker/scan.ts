@@ -1,26 +1,15 @@
-// Скан-воркер (шаг 4): читает watchlist из settings, тянет коллекции из tonapi, считает редкость и
-// Deal Score, персистит items/rarity/listings, пишет дельты в listing_events и inferred-продажи в sales.
+// Legacy tonapi-скан (PluTON v2): каталог/атрибуты/редкость + on-chain листинги (в основном Getgems) с
+// дельта-хранением и вменёнными продажами. ВНЕ пути витрины — оставлен как вспомогательный/фолбэк-пайплайн.
+// Deal Score/премия за редкость удалены (продукт — мультимаркетный трекер на gift-satellite, не Deal Finder).
 //
-// Запуск: npm run worker:scan                 (весь watchlist, с учётом cooldown)
-//         npm run worker:scan -- --force      (игнорировать cooldown)
-//         npm run worker:scan -- EQBG...      (одна коллекция из watchlist)
+// Запуск: npm run worker:scan            (весь watchlist, с учётом cooldown)
+//         npm run worker:scan -- --force (игнорировать cooldown)
+//         npm run worker:scan -- EQBG... (одна коллекция из watchlist)
 import "dotenv/config";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../src/lib/db";
 import { TonApi, saleToPriceTon } from "../src/lib/tonapi";
-import {
-  computeRarity,
-  computeRarityRank,
-  chooseBasePrice,
-  expectedPriceTon,
-  grossUsd,
-  netProceedsUsd,
-  dealScore,
-  type Fees,
-  type Thresholds,
-  type Weights,
-  type Attribute,
-} from "../src/lib/scoring";
+import { computeRarity, type Attribute } from "../src/lib/scoring";
 import { inferSales, type CurrentItemState } from "./inferSales";
 import { upsertItems, upsertRarity, getItemIdMap } from "./persist";
 import { toFriendlyAddress } from "../src/lib/address";
@@ -32,9 +21,15 @@ async function loadSettings() {
   return s;
 }
 
+// itemAddr из tonapi — raw (`0:hex`); getgems резолвит только friendly (EQ…). См. src/lib/address.ts.
 function getgemsUrl(collectionAddr: string, itemAddr: string) {
-  // itemAddr из tonapi — raw (`0:hex`); getgems резолвит только friendly (EQ…). См. src/lib/address.ts.
   return `https://getgems.io/collection/${collectionAddr}/${toFriendlyAddress(itemAddr)}`;
+}
+
+// Getgems → getgems; иначе — нейтральный tonviewer (всегда резолвит текущий on-chain sale). См. инвариант 2.
+function marketUrl(marketName: string | null | undefined, collectionAddr: string, itemAddr: string) {
+  if (marketName && /getgems/i.test(marketName)) return getgemsUrl(collectionAddr, itemAddr);
+  return `https://tonviewer.com/${toFriendlyAddress(itemAddr)}`;
 }
 
 async function main() {
@@ -58,19 +53,13 @@ async function main() {
     }
   }
 
-  // актуальный курс TON→USD + сохранить в settings.rates
+  // актуальный курс TON→USD (для gross usd на листингах) + сохранить в settings.rates
   const tonUsd = await api.getTonUsd();
-  await prisma.setting.update({
+  await prisma.setting.upsert({
     where: { key: "rates" },
-    data: { value: { ...(settings.rates ?? {}), ton_usd: tonUsd } },
+    create: { key: "rates", value: { ...(settings.rates ?? {}), ton_usd: tonUsd } },
+    update: { value: { ...(settings.rates ?? {}), ton_usd: tonUsd } },
   });
-  const fees: Fees = {
-    ton_usd: tonUsd,
-    getgems_sale_pct: settings.fees?.getgems_sale_pct ?? 0.05,
-    gas_ton_per_tx: settings.fees?.gas_ton_per_tx ?? 0.1,
-  };
-  const weights: Weights = settings.weights ?? { Model: 0.2, Backdrop: 0.5, Symbol: 0.3 };
-  const thresholds: Thresholds = settings.thresholds ?? { min_sales_7d: 10, min_sales_30d: 5, min_listings_for_p25: 5 };
 
   // коллекции из watchlist (пересечь с БД, чтобы получить id)
   const dbCollections = await prisma.collection.findMany();
@@ -102,9 +91,7 @@ async function main() {
     try {
       const { seen, nnew, nchanged, ngone } = await scanCollection(col.id, col.address, t.name, {
         api,
-        fees,
-        weights,
-        thresholds,
+        tonUsd,
         scanId: scan.id,
       });
       scannedIds.push(col.id);
@@ -138,14 +125,12 @@ async function main() {
 
 interface Ctx {
   api: TonApi;
-  fees: Fees;
-  weights: Weights;
-  thresholds: Thresholds;
+  tonUsd: number;
   scanId: number;
 }
 
 async function scanCollection(collectionId: number, address: string, name: string, ctx: Ctx) {
-  const { api, fees, weights, thresholds, scanId } = ctx;
+  const { api, tonUsd, scanId } = ctx;
 
   const items = await api.getCollectionItems(address);
   await prisma.collection.update({ where: { id: collectionId }, data: { totalSupply: items.length, name } });
@@ -156,7 +141,6 @@ async function scanCollection(collectionId: number, address: string, name: strin
     items.length
   );
   await upsertRarity(prisma, collectionId, rarity);
-  const rank = computeRarityRank(rarity);
 
   const idMap = await getItemIdMap(prisma, collectionId);
 
@@ -167,7 +151,6 @@ async function scanCollection(collectionId: number, address: string, name: strin
     priceTon: number;
     marketplace: string | null;
     sellerAddress: string | null;
-    attrs: Attribute[];
   }
   const currentListings: Cur[] = [];
   const currentState = new Map<number, CurrentItemState>();
@@ -176,7 +159,8 @@ async function scanCollection(collectionId: number, address: string, name: strin
     const id = idMap.get(it.address);
     if (id == null) continue;
     const priceTon = saleToPriceTon(it.sale);
-    const onSale = it.sale != null && priceTon != null && priceTon > 0;
+    // is_wallet-sale исключаем: wallet-сделки/стухшие контракты (tonapi отдаёт sale и для failed). Инвариант 2.
+    const onSale = it.sale != null && priceTon != null && priceTon > 0 && it.sale.market?.is_wallet !== true;
     currentState.set(id, { nftItemId: id, onSale, ownerAddress: it.owner?.address ?? null });
     if (onSale && !seenListing.has(id)) {
       seenListing.add(id);
@@ -186,70 +170,11 @@ async function scanCollection(collectionId: number, address: string, name: strin
         priceTon: priceTon!,
         marketplace: it.sale?.market?.name ?? null,
         sellerAddress: it.sale?.owner?.address ?? null,
-        attrs: (it.metadata?.attributes ?? []) as Attribute[],
       });
     }
   }
 
-  // база цены: медианы inferred-продаж → p25 листингов (§4)
-  const since7 = new Date(Date.now() - 7 * 864e5);
-  const since30 = new Date(Date.now() - 30 * 864e5);
-  const sales7 = (
-    await prisma.sale.findMany({
-      where: { collectionId, confidence: "inferred", soldAt: { gte: since7 }, priceAmount: { not: null } },
-      select: { priceAmount: true },
-    })
-  ).map((r) => Number(r.priceAmount));
-  const sales30 = (
-    await prisma.sale.findMany({
-      where: { collectionId, confidence: "inferred", soldAt: { gte: since30 }, priceAmount: { not: null } },
-      select: { priceAmount: true },
-    })
-  ).map((r) => Number(r.priceAmount));
-  const { basePriceTon, source } = chooseBasePrice(
-    { sales7, sales30, activeListings: currentListings.map((c) => c.priceTon) },
-    thresholds
-  );
-  const nLiquidity = sales7.length;
-  const nBaseSamples =
-    source === "sales_7d" ? sales7.length : source === "sales_30d" ? sales30.length : currentListings.length;
-
-  function score(priceTon: number, attrs: Attribute[]) {
-    const listNet = grossUsd(priceTon, fees);
-    if (basePriceTon == null) {
-      return {
-        basePriceSource: source,
-        expectedTon: null,
-        expectedNet: null,
-        priceUsdNet: listNet,
-        undervaluation: null,
-        liquidity: null,
-        freshness: null,
-        confidence: null,
-        dealScore: null,
-      };
-    }
-    const expectedTon = expectedPriceTon(attrs, rank, basePriceTon, weights);
-    const expectedNet = netProceedsUsd(expectedTon, fees);
-    const ds = dealScore({
-      expectedNet,
-      listingNet: listNet,
-      nInferredSales7d: nLiquidity,
-      nBaseSamples,
-      priceStalenessDays: null,
-    });
-    return {
-      basePriceSource: source,
-      expectedTon,
-      expectedNet,
-      priceUsdNet: listNet,
-      undervaluation: ds.undervaluationPct,
-      liquidity: ds.liquidityFactor,
-      freshness: ds.freshnessFactor,
-      confidence: ds.confidence,
-      dealScore: ds.dealScore,
-    };
-  }
+  const grossUsd = (priceTon: number) => priceTon * tonUsd;
 
   // дельты против текущего стейта в БД
   const existing = await prisma.listing.findMany({ where: { collectionId } });
@@ -263,7 +188,7 @@ async function scanCollection(collectionId: number, address: string, name: strin
   let ngone = 0;
 
   for (const c of currentListings) {
-    const sc = score(c.priceTon, c.attrs);
+    const priceUsd = grossUsd(c.priceTon);
     const ex = byItem.get(c.nftItemId);
     if (!ex) {
       nnew++;
@@ -271,18 +196,10 @@ async function scanCollection(collectionId: number, address: string, name: strin
         nftItemId: c.nftItemId,
         collectionId,
         marketplace: c.marketplace,
-        marketplaceUrl: getgemsUrl(address, c.address),
+        marketplaceUrl: marketUrl(c.marketplace, address, c.address),
         currency: "TON",
         priceAmount: c.priceTon,
-        priceUsdNet: sc.priceUsdNet,
-        expectedPriceAmount: sc.expectedTon,
-        expectedPriceUsdNet: sc.expectedNet,
-        undervaluationPct: sc.undervaluation,
-        liquidityFactor: sc.liquidity,
-        freshnessFactor: sc.freshness,
-        confidence: sc.confidence,
-        basePriceSource: sc.basePriceSource,
-        dealScore: sc.dealScore,
+        priceUsdNet: priceUsd,
         status: "active",
         sellerAddress: c.sellerAddress,
         listedAt: new Date(),
@@ -296,8 +213,7 @@ async function scanCollection(collectionId: number, address: string, name: strin
         collectionId,
         eventType: "new",
         newPriceAmount: c.priceTon,
-        newPriceUsdNet: sc.priceUsdNet,
-        dealScoreAtEvent: sc.dealScore,
+        newPriceUsdNet: priceUsd,
       });
     } else {
       const oldPrice = ex.priceAmount != null ? Number(ex.priceAmount) : null;
@@ -307,17 +223,9 @@ async function scanCollection(collectionId: number, address: string, name: strin
         where: { id: ex.id },
         data: {
           marketplace: c.marketplace,
-          marketplaceUrl: getgemsUrl(address, c.address),
+          marketplaceUrl: marketUrl(c.marketplace, address, c.address),
           priceAmount: c.priceTon,
-          priceUsdNet: sc.priceUsdNet,
-          expectedPriceAmount: sc.expectedTon,
-          expectedPriceUsdNet: sc.expectedNet,
-          undervaluationPct: sc.undervaluation,
-          liquidityFactor: sc.liquidity,
-          freshnessFactor: sc.freshness,
-          confidence: sc.confidence,
-          basePriceSource: sc.basePriceSource,
-          dealScore: sc.dealScore,
+          priceUsdNet: priceUsd,
           status: "active",
           sellerAddress: c.sellerAddress,
           lastSeenScanId: scanId,
@@ -333,8 +241,7 @@ async function scanCollection(collectionId: number, address: string, name: strin
           collectionId,
           eventType: "reappeared",
           newPriceAmount: c.priceTon,
-          newPriceUsdNet: sc.priceUsdNet,
-          dealScoreAtEvent: sc.dealScore,
+          newPriceUsdNet: priceUsd,
         });
       } else if (priceChanged && oldPrice != null) {
         nchanged++;
@@ -347,9 +254,8 @@ async function scanCollection(collectionId: number, address: string, name: strin
           oldPriceAmount: oldPrice,
           newPriceAmount: c.priceTon,
           oldPriceUsdNet: ex.priceUsdNet != null ? Number(ex.priceUsdNet) : null,
-          newPriceUsdNet: sc.priceUsdNet,
+          newPriceUsdNet: priceUsd,
           priceDeltaPct: ((c.priceTon - oldPrice) / oldPrice) * 100,
-          dealScoreAtEvent: sc.dealScore,
         });
       }
     }
@@ -374,7 +280,7 @@ async function scanCollection(collectionId: number, address: string, name: strin
       nftItemId: s.nftItemId,
       currency: "TON",
       priceAmount: s.priceTon,
-      priceUsdNet: s.priceTon != null ? grossUsd(s.priceTon, fees) : null,
+      priceUsdNet: s.priceTon != null ? grossUsd(s.priceTon) : null,
       seller: s.seller,
       buyer: s.buyer,
       soldAt: new Date(),
@@ -391,7 +297,7 @@ async function scanCollection(collectionId: number, address: string, name: strin
       collectionId,
       eventType: "sold",
       oldPriceAmount: s.priceTon,
-      oldPriceUsdNet: s.priceTon != null ? grossUsd(s.priceTon, fees) : null,
+      oldPriceUsdNet: s.priceTon != null ? grossUsd(s.priceTon) : null,
     });
     await prisma.listing.update({ where: { nftItemId: s.nftItemId }, data: { status: "sold", lastSeenScanId: scanId } });
   }

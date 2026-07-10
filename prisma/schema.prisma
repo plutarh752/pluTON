@@ -245,3 +245,71 @@ model DailyCollectionAggregate {
 
   @@unique([collectionId, day])
 }
+
+// ───────────────────── PluTON v2: персональный мультимаркетный трекер ─────────────────────
+// Источник новой механики — gift-satellite.dev (мультимаркет). Пресеты хранят gift-satellite-имена
+// СТРОКАМИ (не FK на tonapi-Collection): это устойчиво к полному множеству коллекций и к именованию —
+// имена моделей/фонов в dropdown и в фильтре /search приходят из одного источника и совпадают точно.
+
+// Пресет = сохранённая комбинация Коллекция → Модель → Фон (одна колонка на витрине).
+model Preset {
+  id              Int      @id @default(autoincrement())
+  userId          String? // nullable — под будущий мультиюзер (MVP: один глобальный список)
+  collectionName  String // gift-satellite name, напр. "PlushPepe"
+  modelName       String
+  backdropName    String
+  sortOrder       Int      @default(0) // = IDX колонки на витрине
+  previewImageUrl String? // кэш превью (из slug первого лота / модели), опц.
+  createdAt       DateTime @default(now())
+
+  marketListings MarketListing[]
+
+  @@unique([collectionName, modelName, backdropName]) // без дублей комбинаций
+}
+
+// Прогон «Получить цены» — анкер статуса/поллинга/деградации/cooldown (аналог Scan).
+model PriceRun {
+  id           Int        @id @default(autoincrement())
+  startedAt    DateTime   @default(now())
+  finishedAt   DateTime?
+  status       ScanStatus @default(running) // переиспользуем enum: running/success/partial/failed
+  trigger      String?
+  marketStatus Json? // { "PlushPepe": { portals:"ok", tg:"failed", … } } — для degraded-состояний
+  presetsCount Int?
+  lotsCount    Int?
+  error        String?
+  durationMs   Int?
+
+  marketListings MarketListing[]
+
+  @@index([startedAt])
+}
+
+// Снапшот текущих лотов по всем маркетам под каждый пресет (перезаписывается по runId).
+model MarketListing {
+  id                Int      @id @default(autoincrement())
+  runId             Int
+  presetId          Int
+  collectionName    String
+  market            String // tg|portals|tonnel|mrkt|getgems
+  slug              String
+  giftId            String?
+  number            Int? // распарсен из slug (PlushPepe-274 → 274) → бейдж #274
+  modelName         String?
+  backdropName      String?
+  symbolName        String?
+  priceTon          Decimal  @db.Decimal(38, 9)
+  priceStars        Decimal? @db.Decimal(20, 2) // priceTon × ton_usd / stars_usd
+  priceUsd          Decimal? @db.Decimal(20, 2) // gross = priceTon × ton_usd
+  floorTon          Decimal? @db.Decimal(38, 9) // floor коллекции на момент прогона
+  floorDeviationPct Float? // (priceTon - floorTon)/floorTon × 100
+  imageUrl          String?
+  link              String?
+  createdAt         DateTime @default(now())
+
+  run    PriceRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  preset Preset   @relation(fields: [presetId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([presetId])
+}

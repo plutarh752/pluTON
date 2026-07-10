@@ -15,7 +15,10 @@ export interface TonApiPrice {
 
 export interface TonApiSale {
   address: string;
-  market?: { address: string; name?: string };
+  // is_wallet=true → «маркет» это кошелёк (wallet-сделка/Marketapp), а не контракт-эскроу маркетплейса.
+  // Такие sale ненадёжны: tonapi отдаёт их и для стухших/failed листингов (ловили Scared Cat #15630 —
+  // 5× failed transfer, Getgems «не продаётся», но tonapi держит sale). Исключаем из листингов. Инвариант 2.
+  market?: { address: string; name?: string; is_wallet?: boolean };
   owner?: { address: string; name?: string }; // реальный продавец (эскроу)
   price?: TonApiPrice;
 }

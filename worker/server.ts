@@ -11,7 +11,7 @@ const TOKEN = process.env.WORKER_TOKEN ?? "";
 
 const SCRIPT: Record<string, string> = {
   scan: "worker/scan.ts",
-  rescore: "worker/rescore.ts",
+  prices: "worker/prices.ts",
 };
 
 const server = createServer((req, res) => {

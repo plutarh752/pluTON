@@ -1,18 +1,107 @@
 import type { Config } from "tailwindcss";
 
+// Дизайн-система Mono-Light Minimalist (Stitch-экспорт stitch_pluton_gift_tracker/mono_light_minimalist).
+// Токены портированы из DESIGN.md + code.html. Шрифты — Geist (текст/заголовки) + JetBrains Mono
+// (лейблы/цифры) подключаются через next/font в layout.tsx как CSS-переменные.
 const config: Config = {
   darkMode: ["class"],
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        // Scan Diff semantic colors (Screen 3)
+        "on-primary-fixed-variant": "#474646",
+        "tertiary-fixed": "#e6e1df",
+        "on-tertiary-fixed-variant": "#484645",
+        "secondary-fixed": "#e3e1ec",
+        "on-primary-fixed": "#1c1b1b",
+        "surface-container-high": "#e8e8e8",
+        "on-tertiary-container": "#868381",
+        "on-background": "#1a1c1c",
+        "surface-container-low": "#f3f3f4",
+        "surface-bright": "#f9f9f9",
+        "primary-fixed": "#e5e2e1",
+        "outline-variant": "#c4c7c7",
+        "on-tertiary": "#ffffff",
+        "tertiary-fixed-dim": "#cac6c3",
+        "secondary-fixed-dim": "#c6c5cf",
+        "on-error": "#ffffff",
+        primary: "#000000",
+        surface: "#f9f9f9",
+        "surface-dim": "#dadada",
+        "on-secondary": "#ffffff",
+        "on-error-container": "#93000a",
+        "surface-variant": "#e2e2e2",
+        "on-surface-variant": "#444748",
+        "on-primary-container": "#858383",
+        "on-tertiary-fixed": "#1c1b1a",
+        "on-secondary-fixed": "#1a1b22",
+        "on-secondary-fixed-variant": "#46464e",
+        "on-secondary-container": "#63646c",
+        "primary-container": "#1c1b1b",
+        "surface-container-highest": "#e2e2e2",
+        "on-primary": "#ffffff",
+        "error-container": "#ffdad6",
+        "surface-tint": "#5f5e5e",
+        "inverse-surface": "#2f3131",
+        "inverse-primary": "#c8c6c5",
+        "tertiary-container": "#1c1b1a",
+        background: "#f9f9f9",
+        "secondary-container": "#e3e1ec",
+        "primary-fixed-dim": "#c8c6c5",
+        outline: "#747878",
+        "surface-container-lowest": "#ffffff",
+        "inverse-on-surface": "#f0f1f1",
+        "on-surface": "#1a1c1c",
+        tertiary: "#000000",
+        error: "#ba1a1a",
+        secondary: "#5d5e66",
+        "surface-container": "#eeeeee",
+        // Scan Diff semantic colors (legacy — удаляется вместе с /diff в шаге 9)
         diff: {
-          new: "#16a34a", // зелёный — новые лоты
-          gone: "#6b7280", // серый — исчезнувшие
-          cheaper: "#eab308", // жёлтый — подешевевшие
-          pricier: "#dc2626", // красный — подорожавшие
+          new: "#16a34a",
+          gone: "#6b7280",
+          cheaper: "#eab308",
+          pricier: "#dc2626",
         },
+      },
+      borderRadius: {
+        DEFAULT: "0.125rem",
+        lg: "0.25rem",
+        xl: "0.5rem",
+        full: "9999px",
+      },
+      spacing: {
+        gutter: "24px",
+        "margin-mobile": "16px",
+        "margin-desktop": "48px",
+        unit: "4px",
+      },
+      maxWidth: {
+        container: "1280px",
+      },
+      fontFamily: {
+        sans: ["var(--font-geist)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "monospace"],
+        "headline-lg": ["var(--font-geist)"],
+        "headline-lg-mobile": ["var(--font-geist)"],
+        "headline-md": ["var(--font-geist)"],
+        "body-lg": ["var(--font-geist)"],
+        "body-md": ["var(--font-geist)"],
+        "body-base": ["var(--font-geist)"],
+        "label-caps": ["var(--font-geist)"],
+        "label-md": ["var(--font-mono)"],
+        "data-mono": ["var(--font-mono)"],
+      },
+      fontSize: {
+        "headline-lg": ["40px", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "600" }],
+        "headline-lg-mobile": ["32px", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "600" }],
+        "headline-md": ["24px", { lineHeight: "1.3", letterSpacing: "-0.01em", fontWeight: "500" }],
+        "body-lg": ["16px", { lineHeight: "1.6", letterSpacing: "0", fontWeight: "400" }],
+        "body-md": ["14px", { lineHeight: "1.5", letterSpacing: "0", fontWeight: "400" }],
+        "body-base": ["16px", { lineHeight: "1.6", letterSpacing: "0", fontWeight: "400" }],
+        "label-caps": ["12px", { lineHeight: "1.4", letterSpacing: "0.05em", fontWeight: "500" }],
+        "label-md": ["12px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
+        "data-mono": ["12px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
       },
     },
   },

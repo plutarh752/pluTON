@@ -2,16 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Дизайн Mono-Light Minimalist: светлая тема, шрифт Geist по умолчанию. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
 body {
-  @apply bg-white text-neutral-900 antialiased;
+  @apply bg-background text-on-background antialiased;
+  font-family: var(--font-geist), system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  body {
-    @apply bg-neutral-950 text-neutral-100;
-  }
+/* Тонкий технический скроллбар (из Stitch-экспорта). */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #f3f3f4;
+}
+::-webkit-scrollbar-thumb {
+  background: #dadada;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #747878;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
