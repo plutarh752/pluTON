@@ -7,6 +7,7 @@ import { sortBackdropsDarkToLight } from "@/lib/backdropColors";
 import { GiftSatellite } from "@/lib/giftSatellite";
 import { collectionIdMap } from "@/lib/giftPreviews";
 import { changesModelImageUrl } from "@/lib/changesTg";
+import { freshRunningRun } from "@/lib/priceRun";
 
 // Экран «Витрина» (Global Price Index): кнопка «Получить цены» + колонки по пресетам (одна модель = один
 // столбец), внутри столбца — секции по каждому фону.
@@ -27,7 +28,8 @@ export default async function Home() {
   const [presets, lastRun, running, pricesSetting, lastOk] = await Promise.all([
     prisma.preset.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
     prisma.priceRun.findFirst({ orderBy: { startedAt: "desc" } }),
-    prisma.priceRun.findFirst({ where: { status: "running" }, orderBy: { startedAt: "desc" } }),
+    // Свежий running (с учётом STALE_RUNNING_MS) — иначе залипший прогон вечно держит кнопку disabled.
+    freshRunningRun(),
     prisma.setting.findUnique({ where: { key: "prices" } }),
     prisma.priceRun.findFirst({ where: { status: "success" }, orderBy: { startedAt: "desc" } }),
   ]);

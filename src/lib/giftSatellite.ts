@@ -24,6 +24,10 @@ const INTERVALS: Record<string, number> = {
 };
 const DEFAULT_INTERVAL = 550;
 const MAX_RETRIES = 3;
+// Таймаут одного HTTP-запроса. Без него зависшее соединение вешало ВЕСЬ прогон навсегда: воркер ждёт
+// Promise.allSettled, который никогда не резолвится → PriceRun{running} не закрывается (ловили zombie-воркер).
+// По таймауту fetch аборится → бросает → ретрай/отказ → задача маркета падает, прогон завершается degraded.
+const REQUEST_TIMEOUT_MS = 20_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -64,7 +68,7 @@ export class GiftSatellite {
         if (KEY) headers.Authorization = `Token ${KEY}`;
         let res: Response;
         try {
-          res = await fetch(`${BASE}${path}`, { ...init, headers });
+          res = await fetch(`${BASE}${path}`, { ...init, headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
         } catch (e) {
           lastErr = e;
           if (attempt < MAX_RETRIES) {

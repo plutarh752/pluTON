@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { triggerWorker } from "@/lib/trigger";
+import { freshRunningRun } from "@/lib/priceRun";
 
 // Кнопка «Получить цены»: триггер прогона + статус для поллинга (аналог /api/scan).
 export const dynamic = "force-dynamic";
-
-// Строку running старше этого возраста считаем «мёртвой» (воркер упал, не закрыв прогон), чтобы
-// осиротевший PriceRun{running} не блокировал кнопку навсегда. Реальный прогон занимает ~25с.
-const STALE_RUNNING_MS = 10 * 60_000;
 
 async function cooldownLeftSeconds(): Promise<number> {
   const pricesS = await prisma.setting.findUnique({ where: { key: "prices" } });
@@ -16,14 +13,6 @@ async function cooldownLeftSeconds(): Promise<number> {
   if (!lastOk) return 0;
   const ageMs = Date.now() - lastOk.startedAt.getTime();
   return Math.max(0, Math.ceil((cooldownMin * 60_000 - ageMs) / 1000));
-}
-
-// Свежий прогон в статусе running (не залипший). null → можно запускать новый.
-async function freshRunningRun() {
-  const running = await prisma.priceRun.findFirst({ where: { status: "running" }, orderBy: { startedAt: "desc" } });
-  if (!running) return null;
-  if (Date.now() - running.startedAt.getTime() > STALE_RUNNING_MS) return null;
-  return running;
 }
 
 export async function GET() {
