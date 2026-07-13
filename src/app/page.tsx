@@ -1,7 +1,8 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { prisma } from "@/lib/db";
 import { GetPricesButton } from "@/components/GetPricesButton";
-import { PresetColumn, type BackdropSection } from "@/components/PresetColumn";
+import { Showcase, type ColumnData } from "@/components/Showcase";
+import { type BackdropSection } from "@/components/PresetColumn";
 import type { LotView } from "@/components/LotCard";
 import { sortBackdropsDarkToLight } from "@/lib/backdropColors";
 import { GiftSatellite } from "@/lib/giftSatellite";
@@ -78,6 +79,17 @@ export default async function Home() {
     }));
   }
 
+  // Сериализуемые данные колонок → клиентский Showcase (фильтр площадок + сортировка по цене).
+  const columns: ColumnData[] = presets.map((p, i) => ({
+    id: p.id,
+    idx: String(i + 1).padStart(3, "0"),
+    model: p.modelName,
+    collection: p.collectionName,
+    imageUrl: changesModelImageUrl(idMap[p.collectionName], p.modelName),
+    degraded: isDegraded(lastRun?.marketStatus, p.id),
+    sections: sectionsFor(p.id, p.backdropNames),
+  }));
+
   return (
     <main className="flex min-h-[calc(100vh-64px)] flex-col">
       <section className="flex flex-col items-center justify-center border-b border-outline-variant px-margin-mobile py-12 text-center md:px-margin-desktop">
@@ -96,19 +108,7 @@ export default async function Home() {
           </p>
         </div>
       ) : (
-        <section className="no-scrollbar flex flex-grow overflow-x-auto overflow-y-hidden bg-surface-container-lowest">
-          {presets.map((p, i) => (
-            <PresetColumn
-              key={p.id}
-              idx={String(i + 1).padStart(3, "0")}
-              model={p.modelName}
-              collection={p.collectionName}
-              imageUrl={changesModelImageUrl(idMap[p.collectionName], p.modelName)}
-              sections={sectionsFor(p.id, p.backdropNames)}
-              degraded={isDegraded(lastRun?.marketStatus, p.id)}
-            />
-          ))}
-        </section>
+        <Showcase columns={columns} />
       )}
     </main>
   );

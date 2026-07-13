@@ -9,8 +9,11 @@
 const BASE = (process.env.GIFT_SATELLITE_BASE_URL ?? "https://gift-satellite.dev/api").replace(/\/$/, "");
 const KEY = process.env.GIFT_SATELLITE_KEY ?? "";
 
-export type Market = "tg" | "portals" | "tonnel" | "mrkt" | "getgems";
-export const MARKETS: Market[] = ["tg", "portals", "tonnel", "mrkt", "getgems"];
+// Константы маркетов вынесены в client-safe модуль (без process.env/сети) и ре-экспортируются здесь,
+// чтобы существующие импорты `from "@/lib/giftSatellite"` продолжали работать.
+export { MARKETS, marketLabel } from "./markets";
+export type { Market } from "./markets";
+import type { Market } from "./markets";
 
 // Лимиты (мс между запросами на КЛЮЧ лимитера). Ключ = маркет для /search, иначе имя эндпоинта.
 const INTERVALS: Record<string, number> = {
@@ -190,21 +193,6 @@ export function parseNumberFromSlug(slug: string | null | undefined): number | n
 export function giftImageUrl(slug: string | null | undefined): string | null {
   if (!slug) return null;
   return `https://nft.fragment.com/gift/${slug.toLowerCase()}.medium.jpg`;
-}
-
-const MARKET_LABELS: Record<string, string> = {
-  tg: "Telegram",
-  telegram: "Telegram",
-  portals: "Portals",
-  tonnel: "Tonnel",
-  mrkt: "MRKT",
-  getgems: "Getgems",
-};
-
-/** Человекочитаемый ярлык маркета по коду. */
-export function marketLabel(code: string | null | undefined): string {
-  if (!code) return "—";
-  return MARKET_LABELS[code.toLowerCase()] ?? code;
 }
 
 /** Floor коллекции = минимальная цена оффера по всем маркетам в объекте collection-offers. */
