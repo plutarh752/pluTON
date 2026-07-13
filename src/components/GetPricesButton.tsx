@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 
@@ -25,18 +25,56 @@ export function GetPricesButton({ cooldownLeft, running }: { cooldownLeft: numbe
     return () => clearInterval(t);
   }, [left]);
 
-  useEffect(() => {
-    if (!running) return;
-    poll.current = setInterval(async () => {
+  const stopPolling = useCallback(() => {
+    if (poll.current) {
+      clearInterval(poll.current);
+      poll.current = undefined;
+    }
+  }, []);
+
+  // Один опрос статуса + refresh витрины. Возвращает, идёт ли ещё прогон.
+  const checkStatus = useCallback(async (): Promise<boolean> => {
+    try {
       const s = await (await fetch("/api/prices")).json();
       router.refresh();
       if (!s.running) {
-        clearInterval(poll.current);
+        stopPolling();
         setLeft(s.cooldownLeft ?? 0);
       }
-    }, 3000);
-    return () => clearInterval(poll.current);
-  }, [running, router]);
+      return !!s.running;
+    } catch {
+      return false;
+    }
+  }, [router, stopPolling]);
+
+  const ensurePolling = useCallback(() => {
+    if (!poll.current) poll.current = setInterval(checkStatus, 3000);
+  }, [checkStatus]);
+
+  // Пока идёт прогон: сразу один опрос (не ждём 3с) + интервальный поллинг. Гасим при размонтировании.
+  useEffect(() => {
+    if (!running) return;
+    checkStatus();
+    ensurePolling();
+    return stopPolling;
+  }, [running, checkStatus, ensurePolling, stopPolling]);
+
+  // Устойчивость к смене вкладки/навигации: при возврате на видимую страницу немедленно берём свежий
+  // статус (воркер на Railway всё это время работал сам) и, если прогон ещё идёт, возобновляем поллинг —
+  // не полагаемся только на remount. В фоне (hidden) интервал гасим, чтобы не молотить впустую.
+  useEffect(() => {
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        checkStatus().then((stillRunning) => {
+          if (stillRunning) ensurePolling();
+        });
+      } else {
+        stopPolling();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [checkStatus, ensurePolling, stopPolling]);
 
   async function trigger() {
     setBusy(true);

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { backdropColor, sortBackdropsDarkToLight } from "@/lib/backdropColors";
+import { GiftImage } from "./GiftImage";
 
 export interface PresetRow {
   id: number;
@@ -55,11 +56,8 @@ export function PresetList({ presets, activeMap }: { presets: PresetRow[]; activ
             key={p.id}
             className="group flex items-center gap-6 rounded-lg border border-outline-variant bg-surface-container-lowest p-4 transition-colors hover:border-outline"
           >
-            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded border border-outline-variant bg-surface-container-high">
-              {p.previewImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={p.previewImageUrl} alt="" className="h-full w-full object-cover grayscale transition-all group-hover:grayscale-0" />
-              ) : null}
+            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded border border-outline-variant bg-surface-container-high grayscale transition-all group-hover:grayscale-0">
+              <GiftImage src={p.previewImageUrl} alt={p.modelName} />
             </div>
 
             <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-3">

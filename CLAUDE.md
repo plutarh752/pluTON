@@ -4,7 +4,7 @@
 фоновый сервис, не автоматический Deal Finder.** Пользователь один раз настраивает пресеты
 `Коллекция → Модель → [несколько Фонов]`, а по кнопке «Получить цены» видит по каждой модели **колонку**
 активных лотов **с разных площадок** (Telegram, Portals, Tonnel, MRKT, Getgems); внутри колонки — **секции
-по каждому выбранному фону** (тёмный→светлый), с ценой в TON + ⭐Stars + gross `~$` и чипом `× от floor`
+по каждому выбранному фону** (сгруппированы по цвету, внутри семьи тёмный→светлый), с ценой в TON + ⭐Stars + gross `~$` и чипом `× от floor`
 (множитель к floor). Никакой формулы скоринга — просто «сколько стоит эта комбинация прямо сейчас на каждом
 маркете». Между прогонами — read-only витрина из БД.
 
@@ -52,11 +52,18 @@
      поэтому совпадают точно. Мешать с tonapi-атрибутами НЕЛЬЗЯ** (разное написание → 0 совпадений). Имена
      коллекций С пробелами (`"Plush Pepe"`), `slug` — без (`PlushPepe-310`). Поля `link` в листинге нет.
    - **Картинка лота выводится из slug** (`giftImageUrl`): `https://nft.fragment.com/gift/<slug-lower>.medium.jpg`
-     (подтверждён 200); при 404 UI показывает плейсхолдер-плитку (graceful, `GiftImage.tsx`). Превью в форме
-     пресета (`/api/preview`) — картинка первого лота выбранной модели (тот же CDN) + floor коллекции.
+     (подтверждён 200); при 404 UI показывает плейсхолдер-плитку (graceful, `GiftImage.tsx`). Каталог
+     (`/gift/collections`, `/gift/collection/:name`) картинок/цен НЕ отдаёт — картинки/мин.цены берутся
+     ТОЛЬКО из `/search` (см. `src/lib/giftPreviews.ts`). Миниатюры моделей в dropdown — батч по 5 маркетам
+     (`/api/model-previews`, кэш неделя); миниатюра коллекции — лениво по одной (`/api/collection-thumb`,
+     кэш неделя); floor коллекции для dropdown — из `/history/collection-offers` (в `/api/collections`).
+     Фото сохранённого пресета (`Preset.previewImageUrl`) — картинка модели, заполняется на POST + бэкфилл.
    - **У фонов в API есть только `name` + `rarityPermille`, цвета/hex НЕТ** (probe). Цветные образцы фонов
      берутся из захардкоженной палитры Telegram-фонов `src/lib/backdropColors.ts` (имя→центральный hex,
-     сортировка тёмный→светлый по яркости); неизвестное имя → серый fallback + название текстом.
+     сортировка **по цветовой семье (hue), внутри семьи тёмный→светлый по яркости** — одинаковые цвета
+     идут рядом; ахроматичные серые/чёрные/белые — после цветных, неизвестное имя → серый fallback +
+     название текстом). Общая `sortBackdropsDarkToLight` применяется во ВСЕХ местах (мультиселект формы,
+     чипы пресетов, секции столбцов витрины) — чтобы порядок фонов был единым.
    - **Каталог кэшируется** в `Setting`-строке (`gs_cache:*`, TTL 6ч) со **stale-on-error** — dropdown'ы не
      бьются в rate limits и переживают падение источника (`src/lib/gsCache.ts`).
    - **tonapi (`src/lib/tonapi.ts`) — только (a) курс `ton_usd` для $/⭐ и (b) legacy-скан** (см. инв. 8).
@@ -112,17 +119,21 @@
 
 ## Структура
 - `src/app/` — 2 экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
-  (Мои пресеты). API-роуты: `api/collections/` + `api/attributes/` (dropdown'ы из gift-satellite, кэш),
-  `api/preview/` (превью-картинка модели + floor коллекции для формы), `api/presets/` (GET/POST — upsert
-  по коллекция+модель, повторное добавление **сливает** наборы фонов union'ом, не заменяет) +
-  `api/presets/[id]/` (DELETE), `api/prices/` (триггер+статус),
+  (Мои пресеты). API-роуты: `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
+  gift-satellite, кэш), `api/model-previews/` (батч миниатюр+мин.цен моделей коллекции, кэш неделя),
+  `api/collection-thumb/` (ленивая миниатюра одной коллекции, кэш неделя), `api/presets/` (GET/POST — upsert
+  по коллекция+модель, повторное добавление **сливает** наборы фонов union'ом, не заменяет; POST заполняет
+  `previewImageUrl`) + `api/presets/[id]/` (DELETE), `api/prices/` (триггер+статус),
   `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
-- `src/components/` — витрина: `GetPricesButton` (триггер+поллинг), `PresetColumn` (столбец=модель, секции
-  по фонам)/`LotCard`/`LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад
-  Коллекция→Модель→`BackdropMultiSelect` мультивыбор фонов с образцами + `PreviewPanel` превью/floor),
-  `PresetList` (удаление, чипы-образцы фонов); каркас: `Nav` (TopNav/SideNav/MobileNav), `Footer`.
+- `src/components/` — витрина: `GetPricesButton` (триггер+поллинг, устойчив к смене вкладки через
+  `visibilitychange`), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/`LotPrice`/`FloorChip`
+  (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
+  `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
+  `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); каркас: `Nav`, `Footer`.
 - `src/lib/` — `db.ts` (Prisma+Neon), `giftSatellite.ts` (осн. источник), `gsCache.ts` (кэш каталога),
-  `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка тёмный→светлый), `format.ts`
+  `giftPreviews.ts` (картинки/мин.цены из `/search`: батч моделей + миниатюра коллекции + картинка модели,
+  кэш неделя), `rates.ts` (курсы из settings), `backdropColors.ts` (палитра фонов Telegram: имя→hex,
+  сортировка по цветовой семье→тёмный→светлый), `format.ts`
   (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан), `scoring.ts` (только статистика/
   редкость), `trigger.ts` (прод-сигнал Railway / локальный spawn), `address.ts`.
 - `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`,
@@ -135,7 +146,7 @@
 - Прод: Next на Vercel, воркер на always-on Railway (`worker:server`), БД — Neon. Триггер реализован
   (`src/lib/trigger.ts` → HTTP-сигнал Railway; локально — `spawn`). Инструкция — `DEPLOY.md`.
 - **`GIFT_SATELLITE_KEY` нужен В ОБОИХ сервисах:** Vercel (для `/api/collections`, `/api/attributes`,
-  валидации пресетов) **и** Railway (для `worker/prices.ts`). `GIFT_SATELLITE_BASE_URL` опционально
+  `/api/model-previews`, `/api/collection-thumb`, валидации/фото пресетов) **и** Railway (для `worker/prices.ts`). `GIFT_SATELLITE_BASE_URL` опционально
   (дефолт уже верный). `DATABASE_URL` — Neon (в проде pooler-эндпоинт, `sslmode=require`).
 - Один репозиторий, два сервиса: Vercel собирает web (`next build`), Railway — только воркер
   (`worker:server`, без `next build`). Railway build = `npm install --include=dev` (не `npm ci` —

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { GiftSatellite } from "@/lib/giftSatellite";
 import { cachedGs } from "@/lib/gsCache";
+import { cachedModelImageUrl } from "@/lib/giftPreviews";
 
 // Пресеты (единый глобальный список, без логина — MVP). CRUD: список + создание/обновление.
 // Пресет уникален по (collectionName, modelName); backdropNames — массив выбранных фонов (секции столбца).
@@ -29,9 +30,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
 
+  const gs = new GiftSatellite();
+
   // Валидация против атрибутов коллекции (если источник доступен; иначе создаём без валидации — graceful).
   try {
-    const gs = new GiftSatellite();
     const { data } = await cachedGs(`gs_cache:attrs:${collectionName}`, 6 * 3600_000, () =>
       gs.getCollectionAttributes(collectionName)
     );
@@ -48,6 +50,14 @@ export async function POST(req: Request) {
     // источник атрибутов недоступен — не блокируем создание.
   }
 
+  // Картинка модели (первый лот → Fragment CDN, недельный кэш) — фото в списке пресетов. Best-effort.
+  let previewImageUrl: string | null = null;
+  try {
+    previewImageUrl = await cachedModelImageUrl(gs, collectionName, modelName);
+  } catch {
+    // картинка недоступна — покажем плейсхолдер.
+  }
+
   // Upsert по (collectionName, modelName): повторное добавление той же модели СЛИВАЕТ наборы фонов
   // (union), а не заменяет — иначе второе «Добавить» стирало ранее выбранные фоны. Порядок стабильный:
   // прежние фоны в их порядке, затем новые уникальные (точечное удаление фона — отдельная функция).
@@ -58,14 +68,15 @@ export async function POST(req: Request) {
     const merged = Array.from(new Set([...existing.backdropNames, ...backdropNames]));
     const preset = await prisma.preset.update({
       where: { id: existing.id },
-      data: { backdropNames: merged },
+      // картинку дозаполняем, только если её ещё не было (не затираем ранее сохранённую).
+      data: { backdropNames: merged, ...(existing.previewImageUrl ? {} : { previewImageUrl }) },
     });
     return NextResponse.json({ preset, updated: true }, { status: 200 });
   }
 
   const max = await prisma.preset.aggregate({ _max: { sortOrder: true } });
   const preset = await prisma.preset.create({
-    data: { collectionName, modelName, backdropNames, sortOrder: (max._max.sortOrder ?? 0) + 1 },
+    data: { collectionName, modelName, backdropNames, previewImageUrl, sortOrder: (max._max.sortOrder ?? 0) + 1 },
   });
   return NextResponse.json({ preset }, { status: 201 });
 }

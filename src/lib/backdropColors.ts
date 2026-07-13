@@ -102,23 +102,73 @@ export function isKnownBackdrop(name: string | null | undefined): boolean {
   return !!name && name in BACKDROP_HEX;
 }
 
-/** Относительная яркость sRGB hex (0=чёрный … 1=белый). Для сортировки тёмный→светлый. */
-export function backdropLuminance(name: string | null | undefined): number {
-  const hex = backdropColor(name).replace("#", "");
-  const r = parseInt(hex.slice(0, 2), 16) / 255;
-  const g = parseInt(hex.slice(2, 4), 16) / 255;
-  const b = parseInt(hex.slice(4, 6), 16) / 255;
-  // перцептивная яркость (Rec. 709)
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace("#", "");
+  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
 }
 
-/** Сортировка имён фонов тёмный→светлый; неизвестные (серый fallback) — в конце, по алфавиту. */
+/** Относительная яркость sRGB hex (0=чёрный … 1=белый). Для сортировки тёмный→светлый. */
+export function backdropLuminance(name: string | null | undefined): number {
+  const { r, g, b } = hexToRgb(backdropColor(name));
+  // перцептивная яркость (Rec. 709)
+  return 0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255);
+}
+
+/** HSL из hex: h в градусах (0..360), s/l в 0..1. Нужен для группировки фонов по цветовой семье. */
+function hexToHsl(hex: string): { h: number; s: number; l: number } {
+  const { r, g, b } = hexToRgb(hex);
+  const rn = r / 255,
+    gn = g / 255,
+    bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  const d = max - min;
+  let s = 0;
+  let h = 0;
+  if (d !== 0) {
+    s = d / (1 - Math.abs(2 * l - 1));
+    if (max === rn) h = ((gn - bn) / d) % 6;
+    else if (max === gn) h = (bn - rn) / d + 2;
+    else h = (rn - gn) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s, l };
+}
+
+// Ниже этой насыщенности цвет считаем ахроматичным (чёрный/серый/белый) → отдельная семья в конце.
+const ACHROMATIC_S = 0.12;
+
+// Ранг цветовой семьи фона (фиксированный порядок радуги, ахроматичные — последними). Фоны одной семьи
+// идут подряд; внутри семьи сортируем по яркости (тёмный→светлый).
+function backdropFamilyRank(name: string): number {
+  const { h, s } = hexToHsl(backdropColor(name));
+  if (s < ACHROMATIC_S) return 8; // grey / black / white
+  if (h < 15 || h >= 345) return 0; // red
+  if (h < 45) return 1; // orange
+  if (h < 70) return 2; // yellow
+  if (h < 160) return 3; // green
+  if (h < 195) return 4; // cyan
+  if (h < 255) return 5; // blue
+  if (h < 290) return 6; // purple / violet
+  return 7; // magenta / pink
+}
+
+/**
+ * Порядок фонов: сначала по ЦВЕТОВОЙ СЕМЬЕ (hue — одинаковые цвета идут рядом), внутри семьи —
+ * тёмный→светлый по яркости. Ахроматичные (серые/чёрные/белые) — после цветных, тоже тёмный→светлый.
+ * Неизвестные имена (серый fallback, нет в палитре) — в самый конец, по алфавиту.
+ */
 export function sortBackdropsDarkToLight(names: string[]): string[] {
   return [...names].sort((a, b) => {
     const ka = isKnownBackdrop(a);
     const kb = isKnownBackdrop(b);
     if (ka !== kb) return ka ? -1 : 1; // известные первыми
     if (!ka && !kb) return a.localeCompare(b);
-    return backdropLuminance(a) - backdropLuminance(b);
+    const fa = backdropFamilyRank(a);
+    const fb = backdropFamilyRank(b);
+    if (fa !== fb) return fa - fb; // группируем по цветовой семье
+    return backdropLuminance(a) - backdropLuminance(b); // внутри семьи тёмный→светлый
   });
 }
