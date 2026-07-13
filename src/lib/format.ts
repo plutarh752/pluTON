@@ -43,8 +43,8 @@ export function formatBuyPriceParts(
   };
 }
 
-/** Отформатировать `% отклонения от floor`: "-12.3%" / "+4.0%". */
-export function formatFloorDeviation(pct: number): string {
-  const sign = pct > 0 ? "+" : "";
-  return `${sign}${pct.toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
+/** Множитель цены к floor из процентного отклонения: pct=24 → "1.24×", pct=-12 → "0.88×". */
+export function formatFloorMultiple(pct: number): string {
+  const mult = 1 + pct / 100;
+  return `${mult.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
 }

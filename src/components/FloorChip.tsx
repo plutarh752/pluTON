@@ -1,7 +1,8 @@
-import { formatFloorDeviation } from "@/lib/format";
+import { formatFloorMultiple } from "@/lib/format";
 
-// Чип «% от floor коллекции»: зелёный если лот НИЖЕ floor (выгодно), красный если ВЫШЕ.
-// pct = (priceTon - floorTon)/floorTon × 100. null → floor неизвестен, чип не рисуем.
+// Чип «× к floor коллекции»: множитель цены к floor (1.24×, 0.88×). Зелёный если лот НИЖЕ floor
+// (<1×, выгодно), красный если ВЫШЕ (>1×). pct = (priceTon - floorTon)/floorTon × 100; множитель = 1 + pct/100.
+// null → floor неизвестен, чип не рисуем.
 export function FloorChip({ pct, className = "" }: { pct: number | null; className?: string }) {
   if (pct == null || Number.isNaN(pct)) return null;
   const below = pct < 0;
@@ -13,9 +14,9 @@ export function FloorChip({ pct, className = "" }: { pct: number | null; classNa
   return (
     <span
       className={`inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10px] tabular-nums ${tone} ${className}`}
-      title="Отклонение от floor коллекции"
+      title="Множитель цены к floor коллекции"
     >
-      {formatFloorDeviation(pct)} floor
+      {formatFloorMultiple(pct)} floor
     </span>
   );
 }

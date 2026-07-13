@@ -26,26 +26,47 @@ async function loadSettings() {
 }
 
 async function main() {
-  const force = process.argv.slice(2).includes("--force");
+  const argv = process.argv.slice(2);
+  const force = argv.includes("--force");
+  // Роут /api/prices создаёт строку PriceRun{running} синхронно (running-guard) и прокидывает её id сюда.
+  // Тогда воркер БЕРЁТ её (не создаёт вторую) и НЕ проверяет cooldown — guard уже отработал в роуте.
+  const runIdArg = argv.find((a) => a.startsWith("--run-id="));
+  const adoptedRunId = runIdArg ? Number(runIdArg.slice("--run-id=".length)) : null;
   const settings = await loadSettings();
 
-  // cooldown-guard по последнему успешному прогону (settings.prices.cooldown_minutes, default 3).
-  const cooldownMin = settings.prices?.cooldown_minutes ?? 3;
-  const lastOk = await prisma.priceRun.findFirst({ where: { status: "success" }, orderBy: { startedAt: "desc" } });
-  if (lastOk && !force) {
-    const ageMs = Date.now() - lastOk.startedAt.getTime();
-    if (ageMs < cooldownMin * 60_000) {
-      const left = Math.ceil((cooldownMin * 60_000 - ageMs) / 60_000);
-      console.log(`⏳ cooldown: до следующего сбора ~${left} мин (последний #${lastOk.id}). --force для обхода.`);
-      await prisma.$disconnect();
-      return;
+  // cooldown-guard только для самостоятельного запуска (npm run worker:prices / прод без роута).
+  if (adoptedRunId == null) {
+    const cooldownMin = settings.prices?.cooldown_minutes ?? 3;
+    const lastOk = await prisma.priceRun.findFirst({ where: { status: "success" }, orderBy: { startedAt: "desc" } });
+    if (lastOk && !force) {
+      const ageMs = Date.now() - lastOk.startedAt.getTime();
+      if (ageMs < cooldownMin * 60_000) {
+        const left = Math.ceil((cooldownMin * 60_000 - ageMs) / 60_000);
+        console.log(`⏳ cooldown: до следующего сбора ~${left} мин (последний #${lastOk.id}). --force для обхода.`);
+        await prisma.$disconnect();
+        return;
+      }
     }
   }
 
   const presets = await prisma.preset.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
-  const run = await prisma.priceRun.create({
-    data: { status: "running", trigger: "worker", presetsCount: presets.length },
-  });
+
+  // взять созданную роутом строку прогона или создать свою (самостоятельный запуск).
+  let run;
+  if (adoptedRunId != null) {
+    const existing = await prisma.priceRun.findUnique({ where: { id: adoptedRunId } });
+    if (!existing) {
+      console.error(`run #${adoptedRunId} не найден — прерываю (роут должен был его создать).`);
+      await prisma.$disconnect();
+      return;
+    }
+    run = existing;
+    await prisma.priceRun.update({ where: { id: run.id }, data: { presetsCount: presets.length } });
+  } else {
+    run = await prisma.priceRun.create({
+      data: { status: "running", trigger: "worker", presetsCount: presets.length },
+    });
+  }
   console.log(`▶ price run #${run.id} | пресетов: ${presets.length}`);
 
   if (presets.length === 0) {
@@ -83,38 +104,45 @@ async function main() {
     console.warn(`  ! collection-offers недоступны (floor неизвестен): ${(e as Error).message}`);
   }
 
-  // все (пресет × маркет) запросы; лимитер клиента сам держит интервалы per-market (маркеты параллельно).
+  // все (пресет × маркет × фон) запросы; лимитер клиента держит интервалы per-market (маркеты параллельно).
+  // По каждому фону — отдельный /search: секция фона на витрине гарантированно показывает свои лоты
+  // (без обрезки общим лимитом в 50). Больше задач ⇒ прогон дольше (особенно tg: 1 запрос / 1.5с).
   interface Task {
     preset: (typeof presets)[number];
     market: (typeof MARKETS)[number];
+    backdrop: string;
   }
   const tasks: Task[] = [];
-  for (const preset of presets) for (const market of MARKETS) tasks.push({ preset, market });
+  for (const preset of presets)
+    for (const market of MARKETS)
+      for (const backdrop of preset.backdropNames) tasks.push({ preset, market, backdrop });
 
   const settled = await Promise.allSettled(
     tasks.map((t) =>
       gs.searchMarket(t.market, t.preset.collectionName, {
         models: [t.preset.modelName],
-        backdrops: [t.preset.backdropName],
+        backdrops: [t.backdrop],
       })
     )
   );
 
-  // marketStatus[collectionName][market] = "ok" | "failed" (ok, если хоть один запрос пары успешен).
+  // marketStatus[presetId][market] = "ok" | "failed" — degraded теперь per-столбец (модель), а не по
+  // коллекции целиком. ok, если хоть один фон пары (пресет, маркет) успешен.
   const marketStatus: Record<string, Record<string, string>> = {};
   const rows: Prisma.MarketListingCreateManyInput[] = [];
 
   settled.forEach((res, i) => {
-    const { preset, market } = tasks[i];
+    const { preset, market, backdrop } = tasks[i];
     const col = preset.collectionName;
-    marketStatus[col] ??= {};
-    const prev = marketStatus[col][market];
+    const pk = String(preset.id);
+    marketStatus[pk] ??= {};
+    const prev = marketStatus[pk][market];
 
     if (res.status === "rejected") {
-      if (prev !== "ok") marketStatus[col][market] = "failed";
+      if (prev !== "ok") marketStatus[pk][market] = "failed";
       return;
     }
-    marketStatus[col][market] = "ok";
+    marketStatus[pk][market] = "ok";
 
     const floorTon = offersByCollection.has(col) ? collectionFloorFromOffers(offersByCollection.get(col)!) : null;
     for (const l of res.value) {
@@ -128,7 +156,7 @@ async function main() {
         giftId: l.giftId ?? null,
         number: parseNumberFromSlug(l.slug),
         modelName: l.modelName ?? preset.modelName,
-        backdropName: l.backdropName ?? preset.backdropName,
+        backdropName: l.backdropName ?? backdrop, // фон из ответа API; фолбэк — фон запроса
         symbolName: l.symbolName ?? null,
         priceTon,
         priceStars: rates.stars_usd ? tonToStars(priceTon, rates) : null,

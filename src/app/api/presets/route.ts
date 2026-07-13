@@ -3,7 +3,8 @@ import { prisma } from "@/lib/db";
 import { GiftSatellite } from "@/lib/giftSatellite";
 import { cachedGs } from "@/lib/gsCache";
 
-// Пресеты (единый глобальный список, без логина — MVP). CRUD: список + создание.
+// Пресеты (единый глобальный список, без логина — MVP). CRUD: список + создание/обновление.
+// Пресет уникален по (collectionName, modelName); backdropNames — массив выбранных фонов (секции столбца).
 export const dynamic = "force-dynamic";
 
 export async function GET() {
@@ -12,7 +13,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { collectionName?: string; modelName?: string; backdropName?: string };
+  let body: { collectionName?: string; modelName?: string; backdropNames?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -20,8 +21,11 @@ export async function POST(req: Request) {
   }
   const collectionName = body.collectionName?.trim();
   const modelName = body.modelName?.trim();
-  const backdropName = body.backdropName?.trim();
-  if (!collectionName || !modelName || !backdropName) {
+  // нормализуем фоны: массив непустых уникальных строк
+  const backdropNames = Array.isArray(body.backdropNames)
+    ? Array.from(new Set(body.backdropNames.map((b) => String(b).trim()).filter(Boolean)))
+    : [];
+  if (!collectionName || !modelName || backdropNames.length === 0) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
 
@@ -32,10 +36,11 @@ export async function POST(req: Request) {
       gs.getCollectionAttributes(collectionName)
     );
     const hasModel = data.models.some((m) => m.name === modelName);
-    const hasBackdrop = data.backdrops.some((b) => b.name === backdropName);
-    if (!hasModel || !hasBackdrop) {
+    const validBackdrops = new Set(data.backdrops.map((b) => b.name));
+    const badBackdrops = backdropNames.filter((b) => !validBackdrops.has(b));
+    if (!hasModel || badBackdrops.length > 0) {
       return NextResponse.json(
-        { error: "invalid_combination", hasModel, hasBackdrop },
+        { error: "invalid_combination", hasModel, badBackdrops },
         { status: 400 }
       );
     }
@@ -43,17 +48,24 @@ export async function POST(req: Request) {
     // источник атрибутов недоступен — не блокируем создание.
   }
 
-  const max = await prisma.preset.aggregate({ _max: { sortOrder: true } });
-  try {
-    const preset = await prisma.preset.create({
-      data: { collectionName, modelName, backdropName, sortOrder: (max._max.sortOrder ?? 0) + 1 },
+  // Upsert по (collectionName, modelName): повторное добавление той же модели СЛИВАЕТ наборы фонов
+  // (union), а не заменяет — иначе второе «Добавить» стирало ранее выбранные фоны. Порядок стабильный:
+  // прежние фоны в их порядке, затем новые уникальные (точечное удаление фона — отдельная функция).
+  const existing = await prisma.preset.findUnique({
+    where: { collectionName_modelName: { collectionName, modelName } },
+  });
+  if (existing) {
+    const merged = Array.from(new Set([...existing.backdropNames, ...backdropNames]));
+    const preset = await prisma.preset.update({
+      where: { id: existing.id },
+      data: { backdropNames: merged },
     });
-    return NextResponse.json({ preset }, { status: 201 });
-  } catch (e) {
-    // уникальный конфликт (collectionName+modelName+backdropName)
-    if ((e as { code?: string }).code === "P2002") {
-      return NextResponse.json({ error: "duplicate" }, { status: 409 });
-    }
-    throw e;
+    return NextResponse.json({ preset, updated: true }, { status: 200 });
   }
+
+  const max = await prisma.preset.aggregate({ _max: { sortOrder: true } });
+  const preset = await prisma.preset.create({
+    data: { collectionName, modelName, backdropNames, sortOrder: (max._max.sortOrder ?? 0) + 1 },
+  });
+  return NextResponse.json({ preset }, { status: 201 });
 }

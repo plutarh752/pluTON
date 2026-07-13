@@ -39,7 +39,10 @@ const server = createServer((req, res) => {
       return;
     }
     // Concurrency-guard'ы (cooldown, running, rescore_state) уже в вызывающих /api/*-роутах.
-    const child = spawn("npx", ["tsx", script], { cwd: process.cwd(), detached: true, stdio: "inherit", env: process.env });
+    // runId (если роут создал строку прогона синхронно) прокидываем воркеру, чтобы он не плодил вторую.
+    const runId = url.searchParams.get("runId");
+    const args = ["tsx", script, ...(runId ? [`--run-id=${runId}`] : [])];
+    const child = spawn("npx", args, { cwd: process.cwd(), detached: true, stdio: "inherit", env: process.env });
     child.unref();
     console.log(`[worker] triggered ${job}`);
     res.writeHead(202, { "content-type": "application/json" });

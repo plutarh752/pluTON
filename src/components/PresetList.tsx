@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
+import { backdropColor, sortBackdropsDarkToLight } from "@/lib/backdropColors";
 
 export interface PresetRow {
   id: number;
   collectionName: string;
   modelName: string;
-  backdropName: string;
+  backdropNames: string[];
   previewImageUrl: string | null;
 }
 
@@ -65,10 +66,23 @@ export function PresetList({ presets, activeMap }: { presets: PresetRow[]; activ
               <Field label="Коллекция" value={p.collectionName} />
               <Field label="Модель" value={p.modelName} />
               <div>
-                <div className="mb-1 text-[10px] uppercase tracking-widest text-on-surface-variant">Фон</div>
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-surface-dim" />
-                  <span className="font-label-caps text-label-caps text-primary">{p.backdropName}</span>
+                <div className="mb-1 text-[10px] uppercase tracking-widest text-on-surface-variant">
+                  Фоны ({p.backdropNames.length})
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {sortBackdropsDarkToLight(p.backdropNames).map((n) => (
+                    <span
+                      key={n}
+                      className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-0.5"
+                      title={n}
+                    >
+                      <span
+                        className="h-2.5 w-2.5 rounded-full border border-outline-variant"
+                        style={{ backgroundColor: backdropColor(n) }}
+                      />
+                      <span className="font-mono text-[10px] text-primary">{n}</span>
+                    </span>
+                  ))}
                 </div>
               </div>
             </div>

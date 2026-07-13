@@ -47,7 +47,7 @@ export default async function PresetsPage() {
               id: p.id,
               collectionName: p.collectionName,
               modelName: p.modelName,
-              backdropName: p.backdropName,
+              backdropNames: p.backdropNames,
               previewImageUrl: p.previewImageUrl,
             }))}
             activeMap={activeMap}

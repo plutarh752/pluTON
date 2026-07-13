@@ -2,9 +2,10 @@
 
 **Персональный мультимаркетный трекер цен** на коллекционные Telegram-подарки (TON NFT). **Не бот, не
 фоновый сервис, не автоматический Deal Finder.** Пользователь один раз настраивает пресеты
-`Коллекция → Модель → Фон`, а по кнопке «Получить цены» видит по каждому пресету колонку активных лотов
-**с разных площадок** (Telegram, Portals, Tonnel, MRKT, Getgems), с ценой в TON + ⭐Stars + gross `~$` и
-чипом `% от floor`. Никакой формулы скоринга — просто «сколько стоит эта комбинация прямо сейчас на каждом
+`Коллекция → Модель → [несколько Фонов]`, а по кнопке «Получить цены» видит по каждой модели **колонку**
+активных лотов **с разных площадок** (Telegram, Portals, Tonnel, MRKT, Getgems); внутри колонки — **секции
+по каждому выбранному фону** (тёмный→светлый), с ценой в TON + ⭐Stars + gross `~$` и чипом `× от floor`
+(множитель к floor). Никакой формулы скоринга — просто «сколько стоит эта комбинация прямо сейчас на каждом
 маркете». Между прогонами — read-only витрина из БД.
 
 Полный план v2: `/Users/plutarh/.claude/plans/sorted-sleeping-sketch.md`. История v1 (Deal Finder) —
@@ -51,7 +52,11 @@
      поэтому совпадают точно. Мешать с tonapi-атрибутами НЕЛЬЗЯ** (разное написание → 0 совпадений). Имена
      коллекций С пробелами (`"Plush Pepe"`), `slug` — без (`PlushPepe-310`). Поля `link` в листинге нет.
    - **Картинка лота выводится из slug** (`giftImageUrl`): `https://nft.fragment.com/gift/<slug-lower>.medium.jpg`
-     (подтверждён 200); при 404 UI показывает плейсхолдер-плитку (graceful, `GiftImage.tsx`).
+     (подтверждён 200); при 404 UI показывает плейсхолдер-плитку (graceful, `GiftImage.tsx`). Превью в форме
+     пресета (`/api/preview`) — картинка первого лота выбранной модели (тот же CDN) + floor коллекции.
+   - **У фонов в API есть только `name` + `rarityPermille`, цвета/hex НЕТ** (probe). Цветные образцы фонов
+     берутся из захардкоженной палитры Telegram-фонов `src/lib/backdropColors.ts` (имя→центральный hex,
+     сортировка тёмный→светлый по яркости); неизвестное имя → серый fallback + название текстом.
    - **Каталог кэшируется** в `Setting`-строке (`gs_cache:*`, TTL 6ч) со **stale-on-error** — dropdown'ы не
      бьются в rate limits и переживают падение источника (`src/lib/gsCache.ts`).
    - **tonapi (`src/lib/tonapi.ts`) — только (a) курс `ton_usd` для $/⭐ и (b) legacy-скан** (см. инв. 8).
@@ -61,8 +66,10 @@
 3. **Цена = ASK на ПОКУПКУ → три значения TON + ⭐Stars + gross `~$`, БЕЗ net-семантики.** Форматтер —
    `src/lib/format.ts` (`formatBuyPriceParts`, `tonToUsd`, `tonToStars`); компонент — `src/components/LotPrice.tsx`.
    `$ = priceTon × ton_usd` (gross, покупателю), `⭐ = priceTon × ton_usd / stars_usd` (из settings).
-   **Никаких голых TON в UI** — TON всегда с ⭐/$. Чип `% от floor` (`FloorChip.tsx`): `(price-floor)/floor`,
-   зелёный ниже floor / красный выше. Deal Score / премия за редкость **удалены** (рынок floor-driven,
+   **Никаких голых TON в UI** — TON всегда с ⭐/$. Чип `× от floor` (`FloorChip.tsx` + `formatFloorMultiple`):
+   множитель `1 + (price-floor)/floor` → `1.24×` / `0.88×`, зелёный ниже floor (<1×) / красный выше (>1×).
+   В БД хранится `floorDeviationPct` (процент), множитель считается в UI. Deal Score / премия за редкость
+   **удалены** (рынок floor-driven,
    продукт — трекер, не Deal Finder). `scoring.ts` оставлен только со статистикой (median/percentile/computeRarity)
    для legacy-скана.
 
@@ -70,17 +77,23 @@
    (поллинг) — GET `/api/prices`. Запуск воркера абстрагирован в `src/lib/trigger.ts`: **прод**
    (`WORKER_URL` задан) → HTTP-сигнал Railway (`POST /run?job=prices`, Bearer `WORKER_TOKEN`); **локально**
    (`WORKER_URL` пуст) → `spawn`. Джоба стартует только по сигналу. Cooldown/running-guard живут в
-   `/api/prices`, воркер-сервер их не дублирует. Legacy-скан — тем же путём (`job=scan`, `/api/scan`).
+   `/api/prices`, воркер-сервер их не дублирует. **`PriceRun{running}` создаётся синхронно в роуте ДО
+   спавна** (не в воркере) и его `runId` прокидывается воркеру (`--run-id` локально / `&runId=` в прод) —
+   иначе два быстрых POST спавнили два прогона (TOCTOU). Осиротевшую `running`-строку (воркер упал) роут
+   считает мёртвой через `STALE_RUNNING_MS` (10 мин), чтобы кнопка не залипала. Legacy-скан — тем же путём
+   (`job=scan`, `/api/scan`).
 
 5. **Прогон цен → снапшот в БД, витрина читает последний прогон.** `worker/prices.ts`: для каждого
-   пресета × 5 маркетов (маркеты параллельно, per-market лимитер) тянет лоты, считает `priceStars/priceUsd/
-   floorTon/floorDeviationPct`, пишет `MarketListing` под `runId`; статус/деградацию — в `PriceRun`
-   (`marketStatus[collection][market] = ok|failed`). Старые снапшоты чистятся (остаётся последний run).
-   Витрина (`src/app/page.tsx`) читает последний `PriceRun` + его `MarketListing`, группирует по `presetId`.
+   **пресета × 5 маркетов × каждого фона** (отдельный `/search` на фон — секция гарантированно показывает
+   свои лоты без обрезки лимитом 50; маркеты параллельно, per-market лимитер) тянет лоты, считает
+   `priceStars/priceUsd/floorTon/floorDeviationPct`, пишет `MarketListing` под `runId`; статус/деградацию —
+   в `PriceRun` (`marketStatus[presetId][market] = ok|failed` — degraded per-столбец/модель, НЕ по коллекции).
+   Старые снапшоты чистятся (остаётся последний run). Витрина (`src/app/page.tsx`) читает последний `PriceRun`
+   + его `MarketListing`, группирует `presetId → backdropName` (столбец на модель, секции по фонам).
 
 6. **Graceful degradation обязателен.** Маркет вернул `[]` → нет лотов. Маркет упал (429/5xx/timeout) →
-   `marketStatus=failed`, лоты других маркетов показываем. **Все маркеты коллекции упали → колонка
-   «Источник временно недоступен»** (отдельно от пустого «Нет активных лотов»). Пресеты валидируются
+   `marketStatus[presetId][market]=failed`, лоты других маркетов показываем. **Все маркеты пресета/столбца
+   упали → колонка «Источник временно недоступен»** (отдельно от пустого «Нет активных лотов»). Пресеты валидируются
    против gift-satellite-атрибутов; если источник недоступен — создание НЕ блокируем.
 
 7. **Два разных cooldown — не путать:**
@@ -100,18 +113,23 @@
 ## Структура
 - `src/app/` — 2 экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
   (Мои пресеты). API-роуты: `api/collections/` + `api/attributes/` (dropdown'ы из gift-satellite, кэш),
-  `api/presets/` (GET/POST) + `api/presets/[id]/` (DELETE), `api/prices/` (триггер+статус),
+  `api/preview/` (превью-картинка модели + floor коллекции для формы), `api/presets/` (GET/POST — upsert
+  по коллекция+модель, повторное добавление **сливает** наборы фонов union'ом, не заменяет) +
+  `api/presets/[id]/` (DELETE), `api/prices/` (триггер+статус),
   `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
-- `src/components/` — витрина: `GetPricesButton` (триггер+поллинг), `PresetColumn`/`LotCard`/`LotPrice`/
-  `FloorChip`/`GiftImage`; пресеты: `PresetForm` (каскад Коллекция→Модель→Фон), `PresetList` (удаление);
-  каркас: `Nav` (TopNav/SideNav/MobileNav), `Footer`.
+- `src/components/` — витрина: `GetPricesButton` (триггер+поллинг), `PresetColumn` (столбец=модель, секции
+  по фонам)/`LotCard`/`LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад
+  Коллекция→Модель→`BackdropMultiSelect` мультивыбор фонов с образцами + `PreviewPanel` превью/floor),
+  `PresetList` (удаление, чипы-образцы фонов); каркас: `Nav` (TopNav/SideNav/MobileNav), `Footer`.
 - `src/lib/` — `db.ts` (Prisma+Neon), `giftSatellite.ts` (осн. источник), `gsCache.ts` (кэш каталога),
-  `format.ts` (TON+⭐+$), `tonapi.ts` (курс + legacy-скан), `scoring.ts` (только статистика/редкость),
-  `trigger.ts` (прод-сигнал Railway / локальный spawn), `address.ts`.
+  `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка тёмный→светлый), `format.ts`
+  (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан), `scoring.ts` (только статистика/
+  редкость), `trigger.ts` (прод-сигнал Railway / локальный spawn), `address.ts`.
 - `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`,
   `server.ts` (always-on HTTP-сервер для Railway, jobs `prices|scan`).
-- `prisma/` — `schema.prisma` (**12 моделей** + 6 enum; новые: `Preset`, `PriceRun`, `MarketListing`;
-  `ScanStatus` переиспользован для `PriceRun`), `seed.ts`.
+- `prisma/` — `schema.prisma` (**12 моделей** + 6 enum; новые: `Preset` (`backdropNames String[]`, unique
+  по `collectionName+modelName`), `PriceRun`, `MarketListing`; `ScanStatus` переиспользован для `PriceRun`),
+  `seed.ts`.
 
 ## Прод-заметки
 - Прод: Next на Vercel, воркер на always-on Railway (`worker:server`), БД — Neon. Триггер реализован

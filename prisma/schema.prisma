@@ -251,20 +251,21 @@ model DailyCollectionAggregate {
 // СТРОКАМИ (не FK на tonapi-Collection): это устойчиво к полному множеству коллекций и к именованию —
 // имена моделей/фонов в dropdown и в фильтре /search приходят из одного источника и совпадают точно.
 
-// Пресет = сохранённая комбинация Коллекция → Модель → Фон (одна колонка на витрине).
+// Пресет = сохранённая комбинация Коллекция → Модель → [Фоны] (одна колонка на витрине = одна модель).
+// backdropNames — массив выбранных фонов; на витрине каждый фон = отдельная секция внутри столбца.
 model Preset {
   id              Int      @id @default(autoincrement())
   userId          String? // nullable — под будущий мультиюзер (MVP: один глобальный список)
   collectionName  String // gift-satellite name, напр. "PlushPepe"
   modelName       String
-  backdropName    String
+  backdropNames   String[] // выбранные фоны модели (секции столбца)
   sortOrder       Int      @default(0) // = IDX колонки на витрине
   previewImageUrl String? // кэш превью (из slug первого лота / модели), опц.
   createdAt       DateTime @default(now())
 
   marketListings MarketListing[]
 
-  @@unique([collectionName, modelName, backdropName]) // без дублей комбинаций
+  @@unique([collectionName, modelName]) // один столбец на (коллекция, модель); фоны — внутри
 }
 
 // Прогон «Получить цены» — анкер статуса/поллинга/деградации/cooldown (аналог Scan).

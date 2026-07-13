@@ -8,6 +8,7 @@ export interface LotView {
   slug: string;
   number: number | null;
   market: string;
+  backdropName: string | null;
   imageUrl: string | null;
   link: string | null;
   priceTon: number;

@@ -1,17 +1,20 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { prisma } from "@/lib/db";
 import { GetPricesButton } from "@/components/GetPricesButton";
-import { PresetColumn } from "@/components/PresetColumn";
+import { PresetColumn, type BackdropSection } from "@/components/PresetColumn";
 import type { LotView } from "@/components/LotCard";
+import { sortBackdropsDarkToLight } from "@/lib/backdropColors";
 
-// Экран «Витрина» (Global Price Index): кнопка «Получить цены» + колонки лотов по пресетам.
+// Экран «Витрина» (Global Price Index): кнопка «Получить цены» + колонки по пресетам (одна модель = один
+// столбец), внутри столбца — секции по каждому фону.
 export const dynamic = "force-dynamic";
 
-function isDegraded(marketStatus: unknown, collectionName: string): boolean {
+// degraded для столбца = все маркеты пресета упали. marketStatus теперь keyed by presetId.
+function isDegraded(marketStatus: unknown, presetId: number): boolean {
   if (!marketStatus || typeof marketStatus !== "object") return false;
-  const perCollection = (marketStatus as Record<string, Record<string, string>>)[collectionName];
-  if (!perCollection) return false;
-  const vals = Object.values(perCollection);
+  const perPreset = (marketStatus as Record<string, Record<string, string>>)[String(presetId)];
+  if (!perPreset) return false;
+  const vals = Object.values(perPreset);
   return vals.length > 0 && vals.every((v) => v === "failed");
 }
 
@@ -35,14 +38,18 @@ export default async function Home() {
     ? await prisma.marketListing.findMany({ where: { runId: lastRun.id }, orderBy: { priceTon: "asc" } })
     : [];
 
-  const byPreset = new Map<number, LotView[]>();
+  // presetId → backdropName → лоты (упорядочены по цене возр. на уровне запроса).
+  const byPreset = new Map<number, Map<string, LotView[]>>();
   for (const l of listings) {
-    const arr = byPreset.get(l.presetId) ?? [];
+    const bd = l.backdropName ?? "—";
+    const byBackdrop = byPreset.get(l.presetId) ?? new Map<string, LotView[]>();
+    const arr = byBackdrop.get(bd) ?? [];
     arr.push({
       id: l.id,
       slug: l.slug,
       number: l.number,
       market: l.market,
+      backdropName: l.backdropName,
       imageUrl: l.imageUrl,
       link: l.link,
       priceTon: Number(l.priceTon),
@@ -50,7 +57,17 @@ export default async function Home() {
       priceUsd: l.priceUsd != null ? Number(l.priceUsd) : null,
       floorDeviationPct: l.floorDeviationPct,
     });
-    byPreset.set(l.presetId, arr);
+    byBackdrop.set(bd, arr);
+    byPreset.set(l.presetId, byBackdrop);
+  }
+
+  // секции столбца = выбранные фоны пресета, тёмный→светлый; пустые секции показываем тоже.
+  function sectionsFor(presetId: number, backdropNames: string[]): BackdropSection[] {
+    const byBackdrop = byPreset.get(presetId) ?? new Map<string, LotView[]>();
+    return sortBackdropsDarkToLight(backdropNames).map((name) => ({
+      backdropName: name,
+      lots: byBackdrop.get(name) ?? [],
+    }));
   }
 
   return (
@@ -77,9 +94,9 @@ export default async function Home() {
               key={p.id}
               idx={String(i + 1).padStart(3, "0")}
               model={p.modelName}
-              backdrop={p.backdropName}
-              lots={byPreset.get(p.id) ?? []}
-              degraded={isDegraded(lastRun?.marketStatus, p.collectionName)}
+              collection={p.collectionName}
+              sections={sectionsFor(p.id, p.backdropNames)}
+              degraded={isDegraded(lastRun?.marketStatus, p.id)}
             />
           ))}
         </section>
