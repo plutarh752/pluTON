@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { GiftSatellite } from "@/lib/giftSatellite";
 import { cachedGs } from "@/lib/gsCache";
-import { cachedModelImageUrl } from "@/lib/giftPreviews";
+import { collectionTelegramId } from "@/lib/giftPreviews";
+import { changesModelImageUrl } from "@/lib/changesTg";
 
 // Пресеты (единый глобальный список, без логина — MVP). CRUD: список + создание/обновление.
 // Пресет уникален по (collectionName, modelName); backdropNames — массив выбранных фонов (секции столбца).
@@ -50,12 +51,13 @@ export async function POST(req: Request) {
     // источник атрибутов недоступен — не блокируем создание.
   }
 
-  // Картинка модели (первый лот → Fragment CDN, недельный кэш) — фото в списке пресетов. Best-effort.
+  // Картинка = чистый арт модели из changes.tg (детерминированный URL по telegramId коллекции). Best-effort;
+  // страницы всё равно пересчитывают её на рендере, так что промах здесь не критичен.
   let previewImageUrl: string | null = null;
   try {
-    previewImageUrl = await cachedModelImageUrl(gs, collectionName, modelName);
+    previewImageUrl = changesModelImageUrl(await collectionTelegramId(gs, collectionName), modelName);
   } catch {
-    // картинка недоступна — покажем плейсхолдер.
+    // каталог недоступен — оставим плейсхолдер.
   }
 
   // Upsert по (collectionName, modelName): повторное добавление той же модели СЛИВАЕТ наборы фонов

@@ -1,5 +1,6 @@
 import { PackageOpen, WifiOff } from "lucide-react";
 import { LotCard, type LotView } from "./LotCard";
+import { GiftImage } from "./GiftImage";
 import { backdropColor } from "@/lib/backdropColors";
 
 export interface BackdropSection {
@@ -13,21 +14,28 @@ export function PresetColumn({
   idx,
   model,
   collection,
+  imageUrl,
   sections,
   degraded,
 }: {
   idx: string;
   model: string;
   collection: string;
+  imageUrl?: string | null;
   sections: BackdropSection[];
   degraded: boolean;
 }) {
   return (
     <div className="flex min-w-[320px] flex-col border-r border-outline-variant">
-      <div className="flex items-center justify-between border-b border-outline-variant bg-surface-container-low p-4">
-        <div className="min-w-0">
-          <div className="truncate text-label-md uppercase tracking-widest text-primary">{model}</div>
-          <div className="truncate font-mono text-[10px] text-on-surface-variant">{collection}</div>
+      <div className="flex items-center justify-between gap-3 border-b border-outline-variant bg-surface-container-low p-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded border border-outline-variant bg-surface-container-high">
+            <GiftImage src={imageUrl ?? null} alt={model} />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-label-md uppercase tracking-widest text-primary">{model}</div>
+            <div className="truncate font-mono text-[10px] text-on-surface-variant">{collection}</div>
+          </div>
         </div>
         <span className="shrink-0 font-mono text-[10px] text-on-surface-variant">IDX: {idx}</span>
       </div>

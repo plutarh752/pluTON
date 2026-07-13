@@ -4,6 +4,9 @@ import { GetPricesButton } from "@/components/GetPricesButton";
 import { PresetColumn, type BackdropSection } from "@/components/PresetColumn";
 import type { LotView } from "@/components/LotCard";
 import { sortBackdropsDarkToLight } from "@/lib/backdropColors";
+import { GiftSatellite } from "@/lib/giftSatellite";
+import { collectionIdMap } from "@/lib/giftPreviews";
+import { changesModelImageUrl } from "@/lib/changesTg";
 
 // Экран «Витрина» (Global Price Index): кнопка «Получить цены» + колонки по пресетам (одна модель = один
 // столбец), внутри столбца — секции по каждому фону.
@@ -37,6 +40,9 @@ export default async function Home() {
   const listings = lastRun
     ? await prisma.marketListing.findMany({ where: { runId: lastRun.id }, orderBy: { priceTon: "asc" } })
     : [];
+
+  // telegramId по коллекциям → чистый арт модели (changes.tg) в заголовке столбца. Кэшировано, best-effort.
+  const idMap = await collectionIdMap(new GiftSatellite()).catch(() => ({}) as Record<string, string>);
 
   // presetId → backdropName → лоты (упорядочены по цене возр. на уровне запроса).
   const byPreset = new Map<number, Map<string, LotView[]>>();
@@ -95,6 +101,7 @@ export default async function Home() {
               idx={String(i + 1).padStart(3, "0")}
               model={p.modelName}
               collection={p.collectionName}
+              imageUrl={changesModelImageUrl(idMap[p.collectionName], p.modelName)}
               sections={sectionsFor(p.id, p.backdropNames)}
               degraded={isDegraded(lastRun?.marketStatus, p.id)}
             />

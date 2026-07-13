@@ -1,76 +1,50 @@
-import { GiftSatellite, MARKETS, giftImageUrl } from "./giftSatellite";
+import { GiftSatellite, MARKETS } from "./giftSatellite";
 import { cachedGs } from "./gsCache";
 
-// Превью подарков (картинки/мин.цены) для dropdown'ов пресетов и фото сохранённых пресетов.
-// Источник — тот же gift-satellite `/search` (картинки/цены есть ТОЛЬКО там, каталог их не отдаёт).
-// Картинка модели физически не меняется → кэшируем на неделю; мин.цена в пикере — индикативная подсказка
-// (реальные цены даёт прогон «Получить цены»).
+// Превью подарков для dropdown'ов пресетов и фото сохранённых пресетов.
+// Картинки (чистый арт модели / дефолтный вид коллекции) — из changes.tg по детерминированному URL
+// (см. `changesTg.ts`), СЕТЬ не нужна. Здесь остаётся только (а) резолвер collectionName → telegramId
+// из кэшированного каталога gift-satellite и (б) индикативная мин.цена модели из `/search`.
 
-export const PREVIEW_TTL_MS = 7 * 24 * 3600_000; // неделя
+const CATALOG_TTL_MS = 6 * 3600_000; // каталог коллекций — 6ч (как в /api/collections)
+export const MODEL_PRICE_TTL_MS = 7 * 24 * 3600_000; // мин.цена модели — неделя (индикативная подсказка)
 
-/** Картинка первого (самого дешёвого) лота по фильтрам — перебираем маркеты до первого попадания. */
-export async function firstLotImageUrl(
-  gs: GiftSatellite,
-  collection: string,
-  filters: { models?: string[] } = {}
-): Promise<string | null> {
-  for (const market of MARKETS) {
-    try {
-      const lots = await gs.searchMarket(market, collection, filters);
-      if (lots.length && lots[0].slug) return giftImageUrl(lots[0].slug);
-    } catch {
-      // маркет упал — пробуем следующий (graceful)
-    }
-  }
-  return null;
+/** Карта имя коллекции → telegramId из кэшированного каталога (джойн-ключ к changes.tg). */
+export async function collectionIdMap(gs: GiftSatellite): Promise<Record<string, string>> {
+  const { data } = await cachedGs("gs_cache:collections", CATALOG_TTL_MS, () => gs.getCollections());
+  const map: Record<string, string> = {};
+  for (const c of data) if (c.telegramId) map[c.name] = c.telegramId;
+  return map;
 }
 
-/** Картинка модели с недельным кэшем (для POST пресета / бэкфилла / превью). */
-export async function cachedModelImageUrl(
-  gs: GiftSatellite,
-  collection: string,
-  model: string
-): Promise<string | null> {
-  const { data } = await cachedGs(`gs_cache:preview:${collection}:${model}`, PREVIEW_TTL_MS, () =>
-    firstLotImageUrl(gs, collection, { models: [model] })
-  );
-  return data;
-}
-
-/** Миниатюра коллекции (первый лот любой модели) с недельным кэшем. */
-export async function cachedCollectionThumbUrl(gs: GiftSatellite, collection: string): Promise<string | null> {
-  const { data } = await cachedGs(`gs_cache:collthumb:${collection}`, PREVIEW_TTL_MS, () =>
-    firstLotImageUrl(gs, collection)
-  );
-  return data;
+/** telegramId одной коллекции (для preset POST). null — если каталог не знает коллекцию/id. */
+export async function collectionTelegramId(gs: GiftSatellite, name: string): Promise<string | null> {
+  const map = await collectionIdMap(gs);
+  return map[name] ?? null;
 }
 
 export interface ModelPreview {
   imageUrl: string | null;
-  minPriceTon: number;
+  minPriceTon?: number;
 }
 
 /**
- * Батч превью ВСЕХ моделей коллекции одним заходом: `/search` по 5 маркетам без фильтра модели
- * (≤50 лотов на маркет), мерж → карта modelName → {картинка самого дешёвого лота, минимальная цена}.
- * Покрытие — модели, попавшие в cheapest-50 хотя бы одного маркета; остальные вернутся без записи
- * (UI покажет плейсхолдер без цены).
+ * Индикативная мин.цена каждой модели коллекции: `/search` по 5 маркетам без фильтра модели
+ * (≤50 лотов на маркет), мерж → карта modelName → минимальная цена. Покрывает модели, попавшие в
+ * cheapest-50 хотя бы одного маркета; остальные вернутся без цены (картинку им всё равно даёт changes.tg).
  */
-export async function batchModelPreviews(
+export async function batchModelMinPrices(
   gs: GiftSatellite,
   collection: string
-): Promise<Record<string, ModelPreview>> {
+): Promise<Record<string, number>> {
   const settled = await Promise.allSettled(MARKETS.map((m) => gs.searchMarket(m, collection)));
-  const out: Record<string, ModelPreview> = {};
+  const out: Record<string, number> = {};
   for (const res of settled) {
     if (res.status !== "fulfilled") continue;
     for (const lot of res.value) {
       const model = lot.modelName;
       if (!model || typeof lot.normalizedPrice !== "number") continue;
-      const prev = out[model];
-      if (!prev || lot.normalizedPrice < prev.minPriceTon) {
-        out[model] = { imageUrl: giftImageUrl(lot.slug), minPriceTon: lot.normalizedPrice };
-      }
+      if (out[model] == null || lot.normalizedPrice < out[model]) out[model] = lot.normalizedPrice;
     }
   }
   return out;

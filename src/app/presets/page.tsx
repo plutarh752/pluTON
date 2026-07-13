@@ -4,7 +4,8 @@ import { SideNav } from "@/components/Nav";
 import { PresetForm } from "@/components/PresetForm";
 import { PresetList } from "@/components/PresetList";
 import { GiftSatellite } from "@/lib/giftSatellite";
-import { cachedModelImageUrl } from "@/lib/giftPreviews";
+import { collectionIdMap } from "@/lib/giftPreviews";
+import { changesModelImageUrl } from "@/lib/changesTg";
 
 // Экран «Мои пресеты»: каскадная форма + список сохранённых комбинаций.
 export const dynamic = "force-dynamic";
@@ -13,25 +14,11 @@ export default async function PresetsPage() {
   noStore();
   const presets = await prisma.preset.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
 
-  // Бэкфилл фото для пресетов, созданных до фичи (previewImageUrl=null): картинка модели с недельным
-  // кэшем, best-effort. Заполняем и в БД (самолечение), и в текущем рендере.
-  const missing = presets.filter((p) => !p.previewImageUrl);
-  if (missing.length) {
-    const gs = new GiftSatellite();
-    await Promise.all(
-      missing.map(async (p) => {
-        try {
-          const url = await cachedModelImageUrl(gs, p.collectionName, p.modelName);
-          if (url) {
-            await prisma.preset.update({ where: { id: p.id }, data: { previewImageUrl: url } });
-            p.previewImageUrl = url;
-          }
-        } catch {
-          // картинка недоступна — оставим плейсхолдер.
-        }
-      })
-    );
-  }
+  // Фото пресета = чистый арт модели из changes.tg, считаем НА РЕНДЕРЕ по telegramId (детерминированно) —
+  // старые пресеты со stale-URL (Fragment/случайный фон) чинятся автоматически без миграции. Фолбэк на
+  // сохранённое значение, если каталог недоступен (id неизвестен).
+  const gs = new GiftSatellite();
+  const idMap = await collectionIdMap(gs).catch(() => ({}) as Record<string, string>);
 
   // ACTIVE/STANDBY: есть ли по пресету лоты в последнем результативном прогоне.
   const lastRun = await prisma.priceRun.findFirst({
@@ -70,7 +57,7 @@ export default async function PresetsPage() {
               collectionName: p.collectionName,
               modelName: p.modelName,
               backdropNames: p.backdropNames,
-              previewImageUrl: p.previewImageUrl,
+              previewImageUrl: changesModelImageUrl(idMap[p.collectionName], p.modelName) ?? p.previewImageUrl,
             }))}
             activeMap={activeMap}
           />

@@ -6,14 +6,15 @@ import { GiftImage } from "./GiftImage";
 import { formatBuyPriceParts, tonToStars, tonToUsd, type Rates } from "@/lib/format";
 
 // Кастомный dropdown «Модель»: строка = миниатюра + имя + мин.цена (TON + ⭐/$). Нативный <select>
-// картинки не рендерит. Превью/цены — из /api/model-previews (батч по коллекции); для моделей вне
-// покрытия (нет в cheapest-50) показываем плейсхолдер без цены (graceful).
+// картинки не рендерит. Картинка — чистый арт модели из changes.tg (детерминированный URL, есть у КАЖДОЙ
+// модели). Мин.цена — из /api/model-previews (батч по коллекции); модели вне cheapest-50 показываем БЕЗ
+// цены, но С картинкой (graceful).
 interface Named {
   name: string;
 }
 export interface ModelPreviewView {
   imageUrl: string | null;
-  minPriceTon: number;
+  minPriceTon?: number;
 }
 
 function MinPrice({ ton, rates }: { ton: number; rates: Rates }) {
@@ -134,7 +135,7 @@ export function ModelSelect({
                     <span className="min-w-0 flex-1 truncate font-label-caps text-label-caps text-on-surface">
                       {o.name}
                     </span>
-                    {pv ? (
+                    {pv?.minPriceTon != null ? (
                       <MinPrice ton={pv.minPriceTon} rates={rates} />
                     ) : (
                       <span className="shrink-0 font-mono text-[10px] text-outline">—</span>

@@ -51,13 +51,24 @@
    - **Имена коллекций/моделей/фонов в dropdown и в фильтре `/search` — из ОДНОГО источника (gift-satellite),
      поэтому совпадают точно. Мешать с tonapi-атрибутами НЕЛЬЗЯ** (разное написание → 0 совпадений). Имена
      коллекций С пробелами (`"Plush Pepe"`), `slug` — без (`PlushPepe-310`). Поля `link` в листинге нет.
-   - **Картинка лота выводится из slug** (`giftImageUrl`): `https://nft.fragment.com/gift/<slug-lower>.medium.jpg`
-     (подтверждён 200); при 404 UI показывает плейсхолдер-плитку (graceful, `GiftImage.tsx`). Каталог
-     (`/gift/collections`, `/gift/collection/:name`) картинок/цен НЕ отдаёт — картинки/мин.цены берутся
-     ТОЛЬКО из `/search` (см. `src/lib/giftPreviews.ts`). Миниатюры моделей в dropdown — батч по 5 маркетам
-     (`/api/model-previews`, кэш неделя); миниатюра коллекции — лениво по одной (`/api/collection-thumb`,
-     кэш неделя); floor коллекции для dropdown — из `/history/collection-offers` (в `/api/collections`).
-     Фото сохранённого пресета (`Preset.previewImageUrl`) — картинка модели, заполняется на POST + бэкфилл.
+   - **Два источника картинок — не путать:** (a) **картинка ЛОТА** (конкретный экземпляр в колонке витрины)
+     выводится из slug (`giftImageUrl`): `https://nft.fragment.com/gift/<slug-lower>.medium.jpg` — это полный
+     рендер С реальным фоном лота (то что покупаешь); (b) **чистый арт МОДЕЛИ (без фона)** и **дефолтный вид
+     КОЛЛЕКЦИИ до апгрейда** — из **api.changes.tg** (`src/lib/changesTg.ts`), бесплатный keyless источник
+     официального арта Telegram-подарков. gift-satellite чистого арта НЕ отдаёт (probe: у моделей/фонов только
+     `{name, rarityPermille}`). **Джойн к changes.tg — по `telegramId` коллекции (его даёт gift-satellite),
+     НЕ по имени:** `<gift>` в эндпоинтах `/model/<id>/<model>.png` и `/original/<id>.png` принимает Telegram
+     gift id, что резолвит коллекции с расхождением имён (Castle → 400 по имени, 200 по id; Durov's Cap —
+     кудрявый апостроф). Имена МОДЕЛЕЙ у обоих источников из офиц. атрибутов Telegram → совпадают точно, модель
+     джойним по имени. **URL детерминированы и неизменны** — строятся без сети (кэш байтов у CDN/браузера),
+     `?size=64|128|256|512|1024`. Резолвер `collectionName→telegramId` (`collectionIdMap`/`collectionTelegramId`
+     в `giftPreviews.ts`) читает кэшированный каталог. Миниатюра модели в dropdown/арт столбца витрины/фото
+     пресета — `changesModelImageUrl`; миниатюра коллекции в dropdown — `changesOriginalImageUrl` (клиентом, без
+     запроса). `/api/model-previews` отдаёт арт КАЖДОЙ модели каталога (в т.ч. без листингов) + индикативную
+     мин.цену из `/search` (кэш неделя). Фото пресета (`Preset.previewImageUrl`) пишется на POST, но страницы
+     ПЕРЕСЧИТЫВАЮТ его на рендере из telegramId — старые stale-URL чинятся без миграции. floor коллекции для
+     dropdown — из `/history/collection-offers` (в `/api/collections`). При 404/отсутствии id — плейсхолдер
+     (graceful, `GiftImage.tsx`). **Атрибуция @GiftChanges в `Footer.tsx` обязательна** (условие changes.tg).
    - **У фонов в API есть только `name` + `rarityPermille`, цвета/hex НЕТ** (probe). Цветные образцы фонов
      берутся из захардкоженной палитры Telegram-фонов `src/lib/backdropColors.ts` (имя→центральный hex,
      сортировка **по цветовой семье (hue), внутри семьи тёмный→светлый по яркости** — одинаковые цвета
@@ -120,19 +131,21 @@
 ## Структура
 - `src/app/` — 2 экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
   (Мои пресеты). API-роуты: `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
-  gift-satellite, кэш), `api/model-previews/` (батч миниатюр+мин.цен моделей коллекции, кэш неделя),
-  `api/collection-thumb/` (ленивая миниатюра одной коллекции, кэш неделя), `api/presets/` (GET/POST — upsert
-  по коллекция+модель, повторное добавление **сливает** наборы фонов union'ом, не заменяет; POST заполняет
-  `previewImageUrl`) + `api/presets/[id]/` (DELETE), `api/prices/` (триггер+статус),
+  gift-satellite, кэш), `api/model-previews/` (арт КАЖДОЙ модели из changes.tg + мин.цена из `/search`),
+  `api/presets/` (GET/POST — upsert по коллекция+модель, повторное добавление **сливает** наборы фонов
+  union'ом, не заменяет; POST заполняет `previewImageUrl` арт'ом модели) + `api/presets/[id]/` (DELETE),
+  `api/prices/` (триггер+статус),
   `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
 - `src/components/` — витрина: `GetPricesButton` (триггер+поллинг, устойчив к смене вкладки через
   `visibilitychange`), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/`LotPrice`/`FloorChip`
   (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
-  `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); каркас: `Nav`, `Footer`.
+  `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); каркас: `Nav`, `Footer`
+  (в т.ч. обязательная атрибуция @GiftChanges).
 - `src/lib/` — `db.ts` (Prisma+Neon), `giftSatellite.ts` (осн. источник), `gsCache.ts` (кэш каталога),
-  `giftPreviews.ts` (картинки/мин.цены из `/search`: батч моделей + миниатюра коллекции + картинка модели,
-  кэш неделя), `rates.ts` (курсы из settings), `backdropColors.ts` (палитра фонов Telegram: имя→hex,
+  `changesTg.ts` (детерм. URL арта модели/коллекции из api.changes.tg по telegramId), `giftPreviews.ts`
+  (резолвер `collectionName→telegramId` из кэш-каталога + индикативная мин.цена модели из `/search`),
+  `rates.ts` (курсы из settings), `backdropColors.ts` (палитра фонов Telegram: имя→hex,
   сортировка по цветовой семье→тёмный→светлый), `format.ts`
   (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан), `scoring.ts` (только статистика/
   редкость), `trigger.ts` (прод-сигнал Railway / локальный spawn), `address.ts`.
@@ -146,8 +159,10 @@
 - Прод: Next на Vercel, воркер на always-on Railway (`worker:server`), БД — Neon. Триггер реализован
   (`src/lib/trigger.ts` → HTTP-сигнал Railway; локально — `spawn`). Инструкция — `DEPLOY.md`.
 - **`GIFT_SATELLITE_KEY` нужен В ОБОИХ сервисах:** Vercel (для `/api/collections`, `/api/attributes`,
-  `/api/model-previews`, `/api/collection-thumb`, валидации/фото пресетов) **и** Railway (для `worker/prices.ts`). `GIFT_SATELLITE_BASE_URL` опционально
-  (дефолт уже верный). `DATABASE_URL` — Neon (в проде pooler-эндпоинт, `sslmode=require`).
+  `/api/model-previews`, валидации/фото пресетов, резолва telegramId) **и** Railway (для `worker/prices.ts`).
+  `GIFT_SATELLITE_BASE_URL` опционально (дефолт уже верный). Арт подарков (`changesTg.ts` → api.changes.tg) —
+  **keyless**, ключа не требует; `CHANGES_TG_BASE_URL` опционально. `DATABASE_URL` — Neon (в проде
+  pooler-эндпоинт, `sslmode=require`).
 - Один репозиторий, два сервиса: Vercel собирает web (`next build`), Railway — только воркер
   (`worker:server`, без `next build`). Railway build = `npm install --include=dev` (не `npm ci` —
   конфликт с cache-mount Nixpacks; `tsx` нужен воркеру в рантайме, Prisma client — через `postinstall`).

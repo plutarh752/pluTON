@@ -14,6 +14,10 @@ import type { Rates } from "@/lib/format";
 interface Named {
   name: string;
 }
+interface Collection {
+  name: string;
+  telegramId?: string;
+}
 interface Attr {
   name: string;
   rarityPermille?: number;
@@ -23,7 +27,7 @@ const DEFAULT_RATES: Rates = { ton_usd: 1.78, stars_usd: 0.013 };
 
 export function PresetForm() {
   const router = useRouter();
-  const [collections, setCollections] = useState<Named[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
   const [floors, setFloors] = useState<Record<string, number>>({});
   const [rates, setRates] = useState<Rates>(DEFAULT_RATES);
   const [models, setModels] = useState<Named[]>([]);
