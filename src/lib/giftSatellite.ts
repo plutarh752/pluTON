@@ -94,7 +94,19 @@ export class GiftSatellite {
   /** Модели/фоны коллекции (dropdowns «Модель»/«Фон»). Имена совпадают с фильтрами /search. */
   async getCollectionAttributes(name: string): Promise<{ models: GsAttr[]; backdrops: GsAttr[] }> {
     const d = await this.request<GsCollectionDetail>(`/gift/collection/${encodeURIComponent(name)}`, "gift");
-    const clean = (a?: GsAttr[]) => (Array.isArray(a) ? a.filter((x) => x && typeof x.name === "string") : []);
+    // Дедуп по имени: источник иногда отдаёт одно имя дважды (ловили дубль модели «Rave») → React-ключи в
+    // dropdown'ах перестают быть уникальными. Оставляем первое вхождение (имена — ключ фильтра /search).
+    const clean = (a?: GsAttr[]) => {
+      if (!Array.isArray(a)) return [];
+      const seen = new Set<string>();
+      const out: GsAttr[] = [];
+      for (const x of a) {
+        if (!x || typeof x.name !== "string" || seen.has(x.name)) continue;
+        seen.add(x.name);
+        out.push(x);
+      }
+      return out;
+    };
     return { models: clean(d?.models), backdrops: clean(d?.backdrops) };
   }
 

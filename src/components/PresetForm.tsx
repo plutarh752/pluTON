@@ -25,6 +25,12 @@ interface Attr {
 
 const DEFAULT_RATES: Rates = { ton_usd: 1.78, stars_usd: 0.013 };
 
+/** Убирает дубликаты по имени, сохраняя порядок (уникальные React-ключи в dropdown'ах). */
+function uniqByName<T extends { name: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((x) => x && typeof x.name === "string" && !seen.has(x.name) && seen.add(x.name));
+}
+
 export function PresetForm() {
   const router = useRouter();
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -77,8 +83,10 @@ export function PresetForm() {
     try {
       const r = await fetch(`/api/attributes?collection=${encodeURIComponent(name)}`);
       const d = await r.json();
-      setModels(Array.isArray(d.models) ? d.models : []);
-      setBackdrops(Array.isArray(d.backdrops) ? d.backdrops : []);
+      // Дедуп по имени: источник иногда даёт дубль (ловили модель «Rave» у Santa Hat) → неуникальные
+      // React-ключи в dropdown'ах. Защищаемся на клиенте, независимо от свежести серверного кэша атрибутов.
+      setModels(uniqByName(Array.isArray(d.models) ? d.models : []));
+      setBackdrops(uniqByName(Array.isArray(d.backdrops) ? d.backdrops : []));
       if (!r.ok) setMsg("Атрибуты коллекции недоступны");
     } catch {
       setMsg("Атрибуты коллекции недоступны");
