@@ -107,7 +107,18 @@
    `priceStars/priceUsd/floorTon/floorDeviationPct`, пишет `MarketListing` под `runId`; статус/деградацию —
    в `PriceRun` (`marketStatus[presetId][market] = ok|failed` — degraded per-столбец/модель, НЕ по коллекции).
    Старые снапшоты чистятся (остаётся последний run). Витрина (`src/app/page.tsx`) читает последний `PriceRun`
-   + его `MarketListing`, группирует `presetId → backdropName` (столбец на модель, секции по фонам).
+   + его `MarketListing`, группирует `presetId → backdropName` (столбец на модель, секции по фонам), собирает
+   сериализуемые `columns` и отдаёт их клиентскому `Showcase`.
+   - **Панель «Фильтр» (`src/components/Showcase.tsx`) — ГЛОБАЛЬНАЯ, чисто клиентская.** Одна кнопка-тулбар
+     над сеткой (только когда есть пресеты) с поповером: (a) сортировка лотов по цене возр./убыв. и (b) 5
+     чекбоксов площадок вкл/выкл. Обе настройки применяются одинаково ко ВСЕМ колонкам/секциям разом через
+     `useMemo`-деривацию над уже загруженными лотами — **без запросов/API/БД** (фильтр/сортировка — это только
+     преобразование вида, данные не перезапрашиваются). Выбор помнится в `localStorage`
+     (`pluton:showcase-filter:v1`, гидрация в `useEffect` после монтирования → нет SSR-mismatch; дефолт = все
+     площадки, цена по возр.). Секция, опустевшая ИЗ-ЗА фильтра, показывает «Нет активных лотов» (колонки НЕ
+     прячем — стабильный layout). **Выбор направления сортировки закрывает поповер** (иначе на коротком столбце
+     панель перекрывает результат и кажется, что не применилось); чекбоксы площадок (мультивыбор) — не закрывают.
+     Degraded-колонки фильтр не затрагивает (меняет только `sections`, `degraded` пробрасывается нетронутым).
 
 6. **Graceful degradation обязателен.** Маркет вернул `[]` → нет лотов. Маркет упал (429/5xx/timeout) →
    `marketStatus[presetId][market]=failed`, лоты других маркетов показываем. **Все маркеты пресета/столбца
@@ -137,12 +148,16 @@
   `api/prices/` (триггер+статус),
   `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
 - `src/components/` — витрина: `GetPricesButton` (триггер+поллинг, устойчив к смене вкладки через
-  `visibilitychange`), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/`LotPrice`/`FloorChip`
-  (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
+  `visibilitychange`), `Showcase` (клиентская обёртка сетки: глобальная панель «Фильтр» — сортировка по цене
+  + выбор площадок, localStorage; см. инв. 5), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/
+  `LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
   `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); каркас: `Nav`, `Footer`
   (в т.ч. обязательная атрибуция @GiftChanges).
-- `src/lib/` — `db.ts` (Prisma+Neon), `giftSatellite.ts` (осн. источник), `gsCache.ts` (кэш каталога),
+- `src/lib/` — `db.ts` (Prisma+Neon), `giftSatellite.ts` (осн. источник), `markets.ts` (client-safe
+  константы маркетов `Market`/`MARKETS`/`marketLabel` — без `process.env`/сети; `giftSatellite` их
+  РЕ-ЭКСПОРТИРУЕТ, поэтому существующие импорты `from "@/lib/giftSatellite"` не тронуты, а клиентский
+  `Showcase` берёт их отсюда, не таща API-клиент в бандл), `gsCache.ts` (кэш каталога),
   `changesTg.ts` (детерм. URL арта модели/коллекции из api.changes.tg по telegramId), `giftPreviews.ts`
   (резолвер `collectionName→telegramId` из кэш-каталога + индикативная мин.цена модели из `/search`),
   `rates.ts` (курсы из settings), `backdropColors.ts` (палитра фонов Telegram: имя→hex,
