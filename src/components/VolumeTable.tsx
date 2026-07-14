@@ -4,6 +4,7 @@ import { TriangleAlert } from "lucide-react";
 import { GiftImage } from "./GiftImage";
 import { LotPrice } from "./LotPrice";
 import { collectionMarketLinks } from "@/lib/marketLinks";
+import { revealStyle } from "@/lib/reveal";
 
 // Таблица вкладки «Объёмы» (read-only, данные из последнего прогона Portals). Колонки: картинка, название,
 // floor (TON+$), объём (TON+$), последняя продажа, топ-3 модели, ссылки на маркеты. Сорт по объёму убыв.
@@ -60,7 +61,8 @@ export function VolumeTable({ rows }: { rows: VolumeRow[] }) {
             return (
               <tr
                 key={r.collectionName}
-                className="border-b border-outline-variant/60 transition-colors hover:bg-surface-container-low"
+                className="reveal-fade border-b border-outline-variant/60 transition-colors hover:bg-surface-container-low"
+                style={revealStyle(i)}
               >
                 <td className="px-3 py-3 font-mono text-xs text-on-surface-variant tabular-nums">
                   {String(i + 1).padStart(3, "0")}

@@ -2,6 +2,7 @@ import { PackageOpen, WifiOff } from "lucide-react";
 import { LotCard, type LotView } from "./LotCard";
 import { GiftImage } from "./GiftImage";
 import { backdropColor } from "@/lib/backdropColors";
+import { revealStyle } from "@/lib/reveal";
 
 export interface BackdropSection {
   backdropName: string;
@@ -67,8 +68,10 @@ export function PresetColumn({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {s.lots.map((lot) => (
-                    <LotCard key={lot.id} lot={lot} />
+                  {s.lots.map((lot, i) => (
+                    <div key={lot.id} className="reveal" style={revealStyle(i)}>
+                      <LotCard lot={lot} />
+                    </div>
                   ))}
                 </div>
               )}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { backdropColor, sortBackdropsDarkToLight } from "@/lib/backdropColors";
+import { revealStyle } from "@/lib/reveal";
 import { GiftImage } from "./GiftImage";
 
 export interface PresetRow {
@@ -49,12 +50,13 @@ export function PresetList({ presets, activeMap }: { presets: PresetRow[]; activ
         <span className="font-mono text-[11px] text-outline">Sorted by: Order</span>
       </div>
 
-      {presets.map((p) => {
+      {presets.map((p, i) => {
         const active = (activeMap[p.id] ?? 0) > 0;
         return (
           <div
             key={p.id}
-            className="group flex items-center gap-6 rounded-lg border border-outline-variant bg-surface-container-lowest p-4 transition-colors hover:border-outline"
+            className="group reveal flex items-center gap-6 rounded-lg border border-outline-variant bg-surface-container-lowest p-4 transition-colors hover:border-outline"
+            style={revealStyle(i)}
           >
             <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded border border-outline-variant bg-surface-container-high grayscale transition-all group-hover:grayscale-0">
               <GiftImage src={p.previewImageUrl} alt={p.modelName} />
