@@ -20,6 +20,10 @@ const SETTINGS: Record<string, unknown> = {
   prices: {
     cooldown_minutes: 3, // кнопка «Получить цены» (gift-satellite) — лёгкая частая операция
   },
+  volume: {
+    cooldown_minutes: 15, // кнопка «Получить объём» (Portals) — тяжёлый прогон, реже
+    collections_limit: 500, // сколько коллекций тянуть из Portals /collections
+  },
   tonapi: {
     api_key: "", // free tier (1 RPS) ключа не требует
   },

@@ -5,6 +5,7 @@
 import "dotenv/config";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
+import { assertPortalsAuth } from "../src/lib/portals";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const TOKEN = process.env.WORKER_TOKEN ?? "";
@@ -12,6 +13,7 @@ const TOKEN = process.env.WORKER_TOKEN ?? "";
 const SCRIPT: Record<string, string> = {
   scan: "worker/scan.ts",
   prices: "worker/prices.ts",
+  volume: "worker/volume.ts",
 };
 
 const server = createServer((req, res) => {
@@ -41,7 +43,13 @@ const server = createServer((req, res) => {
     // Concurrency-guard'ы (cooldown, running, rescore_state) уже в вызывающих /api/*-роутах.
     // runId (если роут создал строку прогона синхронно) прокидываем воркеру, чтобы он не плодил вторую.
     const runId = url.searchParams.get("runId");
-    const args = ["tsx", script, ...(runId ? [`--run-id=${runId}`] : [])];
+    const period = url.searchParams.get("period"); // окно объёма (job=volume): 24h|7d|30d
+    const args = [
+      "tsx",
+      script,
+      ...(runId ? [`--run-id=${runId}`] : []),
+      ...(period ? [`--period=${period}`] : []),
+    ];
     const child = spawn("npx", args, { cwd: process.cwd(), detached: true, stdio: "inherit", env: process.env });
     child.unref();
     console.log(`[worker] triggered ${job}`);
@@ -54,4 +62,9 @@ const server = createServer((req, res) => {
   res.end(JSON.stringify({ error: "not_found" }));
 });
 
-server.listen(PORT, () => console.log(`[worker] trigger server listening on :${PORT}`));
+server.listen(PORT, () => {
+  console.log(`[worker] trigger server listening on :${PORT}`);
+  // Health-check Portals-авторизации при старте: протухший tma виден сразу в логе (громкий баннер),
+  // а не в глубине первого прогона объёма. Сервер НЕ падает — scan/prices от Portals не зависят.
+  assertPortalsAuth().catch(() => {});
+});

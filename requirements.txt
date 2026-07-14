@@ -1,0 +1,7 @@
+# Python-зависимости Portals-сайдкара вкладки «Объёмы» (worker/portals_fetch.py, worker/portals_login.py).
+# Устанавливаются на Railway (Nixpacks, provider python) и локально. Node-часть их НЕ импортирует —
+# только спавнит python3-скрипты (src/lib/portals.ts). Vercel эти депсы НЕ требует (web Portals не дёргает).
+portalsmp>=1.0.1     # обёртка Portals API (curl_cffi обход Cloudflare + сборка URL + парсинг)
+pyrogram>=2.0.106    # Telegram MTProto: headless-минт tma из session-строки (RequestAppWebView)
+tgcrypto>=1.2.5      # ускоритель шифрования Pyrogram (опц.; при проблемах сборки можно убрать)
+curl_cffi>=0.7.0     # TLS-impersonation (chrome110) для прохода Cloudflare Portals

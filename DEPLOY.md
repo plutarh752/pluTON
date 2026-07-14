@@ -83,3 +83,42 @@ DATABASE_URL=... npm run db:seed   # settings + watchlist (идемпотент�
   генерится через `postinstall`.
 - **Docker-compose** (`docker-compose.yml`) — для локального стенда с собственным Postgres; в проде не
   используется (БД = Neon, воркер = Railway).
+
+---
+
+## 5. Вкладка «Объёмы» — Portals + Python на воркере (CLAUDE.md инвариант 9)
+
+Реальный объём торгов есть только у Portals (за Cloudflare + истекающим Telegram-`tma`). Грязь изолирована
+в Python-сайдкаре `worker/portals_fetch.py` (portalsmp + pyrogram + curl_cffi), который Node-воркер спавнит.
+Поэтому **воркер-сервису на Railway теперь нужен Python 3**, а не только Node.
+
+### 5.1 Одноразовый Telegram-логин (ЛИЧНО, локально)
+
+```bash
+export TELEGRAM_API_ID=...      # my.telegram.org → API development tools
+export TELEGRAM_API_HASH=...
+npm run portals:login           # спросит номер телефона + код (и 2FA-пароль, если включён)
+# → печатает TELEGRAM_SESSION=... — скопируй в .env (локально) и в Railway-variables (прод)
+npm run portals:health          # проверка: «✅ Portals auth OK»
+```
+
+`tma` истекает → health-check при старте `worker:server` и в начале каждого прогона объёма кричит в лог
+громким баннером «❌ PORTALS AUTH DEAD». Тогда повтори `npm run portals:login` и обнови `TELEGRAM_SESSION`.
+
+### 5.2 Railway (воркер): Node + Python
+
+- Новые variables: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION` (+ уже имеющиеся).
+- Сборка Node+Python описана в `nixpacks.toml` (`python311` + `gcc`, `pip install -r requirements.txt`).
+  **Проверь деплой:** в логах билда — установка portalsmp/pyrogram/curl_cffi; при старте — строка
+  health-check. Если Nixpacks не подхватил Python — задай в Railway Build Command явно
+  `npm install --include=dev && pip install --break-system-packages -r requirements.txt`, Start Command
+  `npm run worker:server`. Если `tgcrypto` не собирается — убери его из `requirements.txt` (Pyrogram
+  работает и без него, медленнее).
+- Vercel `nixpacks.toml` игнорирует (web = `next build`, Python не нужен, Telegram-переменные не задавать).
+
+### 5.3 Проверка end-to-end
+
+1. Открой `/volumes` → дропдаун периода (24ч/7д/30д) + кнопка «Получить объём».
+2. Выбери период, нажми → `POST /api/volume?period=` 202 → воркер: health-check → Portals → снапшот.
+3. По завершении таблица: коллекции по объёму убыв., floor/объём (TON+$), посл. продажа, топ-3 модели,
+   ссылки. У неполных (7д/30д) строк — бейдж ⚠ рядом с объёмом.

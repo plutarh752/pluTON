@@ -1,6 +1,5 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { prisma } from "@/lib/db";
-import { SideNav } from "@/components/Nav";
 import { PresetForm } from "@/components/PresetForm";
 import { PresetList } from "@/components/PresetList";
 import { GiftSatellite } from "@/lib/giftSatellite";
@@ -36,10 +35,8 @@ export default async function PresetsPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-container">
-      <SideNav />
-      <main className="flex-1 px-margin-mobile py-12 md:px-margin-desktop">
-        <header className="mb-12">
+    <main className="mx-auto max-w-container px-margin-mobile py-12 md:px-margin-desktop">
+      <header className="mb-12">
           <h1 className="mb-2 font-headline-lg text-headline-lg text-primary">Мои избранные комбинации</h1>
           <p className="max-w-2xl text-on-surface-variant">
             Настрой пресеты «Коллекция → Модель → Фон» для быстрого доступа к ценам по всем площадкам сразу.
@@ -62,7 +59,6 @@ export default async function PresetsPage() {
             activeMap={activeMap}
           />
         </section>
-      </main>
-    </div>
+    </main>
   );
 }

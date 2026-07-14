@@ -29,3 +29,11 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# python (Portals-сайдкар вкладки «Объёмы»)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.session
+*.session-journal

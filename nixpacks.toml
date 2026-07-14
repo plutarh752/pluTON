@@ -1,0 +1,18 @@
+# Nixpacks (Railway) — воркер-сервису PluTON нужен И Node (tsx-воркеры), И Python 3 (Portals-сайдкар
+# вкладки «Объёмы»: worker/portals_fetch.py на portalsmp + pyrogram + curl_cffi).
+# Node остаётся основным рантаймом; Python и pip-зависимости (requirements.txt) доустанавливаем.
+# ВНИМАНИЕ: этот файл меняет сборку воркер-сервиса на Railway — проверь деплой (условие 10 плана).
+# Vercel (web) файл игнорирует: там `next build` без Python. gcc нужен для сборки tgcrypto.
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "python311", "gcc"]
+
+[phases.install]
+cmds = [
+  "npm install --include=dev",
+  "python3 -m ensurepip --upgrade || true",
+  "python3 -m pip install --break-system-packages -r requirements.txt"
+]
+
+[start]
+cmd = "npm run worker:server"

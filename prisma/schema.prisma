@@ -314,3 +314,47 @@ model MarketListing {
   @@index([runId])
   @@index([presetId])
 }
+
+// ───────────────────── PluTON v2: вкладка «Объёмы» (Portals real-volume engine) ─────────────────────
+// Источник реального объёма/продаж — Portals (authed, через Python-сайдкар worker/portals_fetch.py).
+// gift-satellite/Giftstat объёма НЕ отдают (см. CLAUDE.md). Контур повторяет «Получить цены»:
+// кнопка → VolumeRun{running} → worker/volume.ts → снапшот CollectionVolume → read-only /volumes.
+
+// Прогон «Получить объём» — анкер статуса/поллинга/деградации/cooldown (аналог PriceRun).
+model VolumeRun {
+  id               Int        @id @default(autoincrement())
+  startedAt        DateTime   @default(now())
+  finishedAt       DateTime?
+  status           ScanStatus @default(running) // переиспользуем enum: running/success/partial/failed
+  trigger          String?
+  period           String // окно расчёта: "24h" | "7d" | "30d" (выбирается ДО запуска)
+  collectionsCount Int?
+  authOk           Boolean? // health-check Portals-авторизации на старте прогона
+  error            String?
+  durationMs       Int?
+
+  collectionVolumes CollectionVolume[]
+
+  @@index([period, startedAt])
+}
+
+// Снапшот рыночной статистики по коллекции за прогон (перезаписывается по runId).
+model CollectionVolume {
+  id                Int       @id @default(autoincrement())
+  runId             Int
+  telegramId        String? // join к changes.tg/каталогу gift-satellite (картинка коллекции)
+  collectionName    String
+  floorTon          Decimal?  @db.Decimal(38, 9)
+  volumeTon         Decimal   @db.Decimal(38, 9) // объём торгов за период
+  volumeUsd         Decimal?  @db.Decimal(20, 2) // volumeTon × ton_usd
+  salesCount        Int?
+  lastSaleAt        DateTime? // время последней вторичной продажи (из Portals feed)
+  topModels         Json? // [{ model, count }] — топ-3 продаваемых моделей за период
+  isPartial         Boolean   @default(false) // объём НЕПОЛНЫЙ: пагинация feed уперлась в кап раньше границы окна
+  blockchainAddress String? // TON-адрес коллекции (для ссылки на getgems), опц.
+  createdAt         DateTime  @default(now())
+
+  run VolumeRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}

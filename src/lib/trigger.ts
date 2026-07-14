@@ -6,24 +6,27 @@ import { spawn } from "node:child_process";
 //      лишь по кнопке «Скан»).
 //   • ЛОКАЛЬНО: spawn отдельного процесса (Vercel-serverless в проде не держит долгий скан,
 //     поэтому там воркер живёт на Railway).
-export type Job = "scan" | "prices";
+export type Job = "scan" | "prices" | "volume";
 
 const SCRIPT: Record<Job, string> = {
   scan: "worker/scan.ts",
   prices: "worker/prices.ts",
+  volume: "worker/volume.ts",
 };
 
 /**
  * Возвращает true, если триггер принят (202) или воркер уже занят (409 — это не ошибка вызова).
- * `runId` — если роут уже создал строку прогона (PriceRun/Scan) синхронно для concurrency-guard'а,
+ * `runId` — если роут уже создал строку прогона (PriceRun/Scan/VolumeRun) синхронно для concurrency-guard'а,
  * прокидываем её id воркеру, чтобы он взял ЕЁ, а не создавал вторую (иначе TOCTOU-дубль прогона).
+ * `period` — окно объёма (24h|7d|30d) для job="volume": пробрасываем в прод-URL и в локальные argv.
  */
-export async function triggerWorker(job: Job, runId?: number): Promise<boolean> {
+export async function triggerWorker(job: Job, runId?: number, period?: string): Promise<boolean> {
   const workerUrl = process.env.WORKER_URL;
 
   if (workerUrl) {
     const runParam = runId != null ? `&runId=${runId}` : "";
-    const res = await fetch(`${workerUrl.replace(/\/$/, "")}/run?job=${job}${runParam}`, {
+    const periodParam = period ? `&period=${encodeURIComponent(period)}` : "";
+    const res = await fetch(`${workerUrl.replace(/\/$/, "")}/run?job=${job}${runParam}${periodParam}`, {
       method: "POST",
       headers: { authorization: `Bearer ${process.env.WORKER_TOKEN ?? ""}` },
     });
@@ -32,7 +35,12 @@ export async function triggerWorker(job: Job, runId?: number): Promise<boolean> 
   }
 
   // Локально: detached-процесс, не блокирует запрос и не упирается в лимит времени serverless.
-  const args = ["tsx", SCRIPT[job], ...(runId != null ? [`--run-id=${runId}`] : [])];
+  const args = [
+    "tsx",
+    SCRIPT[job],
+    ...(runId != null ? [`--run-id=${runId}`] : []),
+    ...(period ? [`--period=${period}`] : []),
+  ];
   const child = spawn("npx", args, {
     cwd: process.cwd(),
     detached: true,

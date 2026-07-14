@@ -23,9 +23,15 @@
 ## Команды
 - `npm run dev` — веб (Next).
 - `npm run worker:prices [-- --force]` — один прогон «Получить цены» (gift-satellite, движок витрины).
+- `npm run worker:volume -- --period=24h|7d|30d [-- --force]` — один прогон «Получить объём» (Portals,
+  движок вкладки «Объёмы»). Первым шагом — health-check Portals-авторизации (см. инвариант 9).
+- `npm run portals:health` — ручной health-check Portals-tma («✅ Portals auth OK» или громкий баннер + exit 1).
+- `npm run portals:login` — одноразовый интерактивный вход в Telegram (ввод телефона+кода ЛИЧНО) →
+  печатает `TELEGRAM_SESSION` для headless-минта tma. Требует `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`.
 - `npm run worker:scan [-- --force] [-- <address>]` — legacy tonapi-скан (каталог/on-chain/дельты, вне пути витрины).
-- `npm run worker:server` — always-on воркер-сервер (прод, Railway): слушает `POST /run?job=prices|scan`
+- `npm run worker:server` — always-on воркер-сервер (прод, Railway): слушает `POST /run?job=prices|scan|volume`
   (Bearer `WORKER_TOKEN`) + `GET /health`. Спавнит джобу, HTTP остаётся отзывчивым (`worker/server.ts`).
+  **При старте печатает health-check Portals** (инвариант 9); сервер НЕ падает при протухшем tma.
 - `npm run db:seed` — сид settings + watchlist (идемпотентно).
 - `npm run typecheck` / `npm run build` — проверка перед завершением задач. `npm audit` = 0.
 - Миграции применяются **offline** (`prisma migrate diff --from-schema-datamodel <старая> --to-schema-datamodel
@@ -139,14 +145,55 @@
    ловили Scared Cat #15630; `marketUrl` не хардкодить на getgems) действуют внутри скана. Витрина эти
    данные НЕ читает (риск рассинхрона имён с gift-satellite).
 
+9. **Вкладка «Объёмы» = реальный объём/продажи ТОЛЬКО из Portals (authed), НЕ из gift-satellite/Giftstat.**
+   Эмпирически (probe): ни gift-satellite, ни keyless-Giftstat (`api.giftstat.app`) НЕ отдают объём торгов,
+   вторичные продажи, время последней сделки и счётчик продаж по моделям (`/volume`,`/sales`,`/activity` →
+   404; `last_sale_date` Giftstat = дата ПЕРВИЧНОГО минта; `model_count` = тираж, не продажи). Реальный
+   объём есть только у Portals (`portals-market.com/api`), за Cloudflare + истекающим Telegram-`tma`.
+   - **Изоляция грязи в Python-сайдкаре** `worker/portals_fetch.py` (portalsmp: curl_cffi обход Cloudflare +
+     Pyrogram минт tma из headless session-строки `TELEGRAM_SESSION`). Node-воркер `worker/volume.ts` его
+     **спавнит** (как tsx-джобы) и читает JSON; вся работа с БД — в Node. Сайдкар минтит tma ОДИН раз на
+     процесс (режим `--run` обходит все коллекции внутри одного процесса; per-collection spawn плодил бы
+     100+ Telegram-коннектов). `src/lib/portals.ts` — мост Node→сайдкар + защитный парсинг (схема Portals
+     из dev-среды не проб'илась → поля коллекций/продаж парсим по кандидатам ключей, как giftSatellite;
+     первый реальный прогон логирует `sample` — при расхождении поправить кандидаты).
+   - **Health-check обязателен и громкий** (`assertPortalsAuth` в `src/lib/portals.ts`): при протухшем tma
+     печатает жирный баннер в терминал (обнови сессию → `npm run portals:login`) и роняет прогон ДО обхода
+     коллекций. Зовётся: старт `worker:server`, первый шаг `worker/volume.ts`, `npm run portals:health`.
+   - **Контур — как «Получить цены»** (инв. 4/5): кнопка «Получить объём» + дропдаун периода (24h/7d/30d,
+     выбор ДО запуска) → `POST /api/volume?period=` создаёт `VolumeRun{running,period}` СИНХРОННО (TOCTOU) →
+     `triggerWorker("volume", runId, period)` → снапшот в `CollectionVolume` → read-only `/volumes` читает
+     последний прогон периода (сорт по объёму убыв.). Cooldown `settings.volume.cooldown_minutes` (деф. 15),
+     per-period; running-guard `freshVolumeRun` (STALE 20 мин). Старые прогоны периода чистятся.
+   - **`isPartial` — про полноту ОБЪЁМА, per-collection** (не общий текст): 24h объём = нативный daily
+     volume Portals (полон → `isPartial=false`); 7d/30d = сумма продаж из sales-feed за окно, `isPartial =
+     capped || budgetSkipped` (пагинация уперлась в per-collection кап ИЛИ до коллекции не дошёл общий бюджет
+     времени прогона `PORTALS_RUN_BUDGET_SEC`). В таблице у таких строк — бейдж `TriangleAlert` с тултипом
+     рядом с ячейкой объёма.
+   - **Цены/floor/объём в TON всегда с `$`** (инв. 3): `LotPrice` со `stars=null`. Картинки коллекций —
+     `changesOriginalImageUrl` по telegramId (keyless, инв. 2); telegramId из `collectionIdMap`
+     (gift-satellite) с фолбэком на Giftstat. `blockchain_address` (ссылка на Getgems) — из keyless Giftstat
+     (`src/lib/giftstat.ts`). Ссылки на маркеты — `src/lib/marketLinks.ts` (надёжен per-collection только
+     Getgems по адресу; Portals/Fragment — вход в маркет).
+   - **Секреты Telegram — В ОБОИХ местах, где живёт сайдкар:** воркер (локально спавн, прод Railway):
+     `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION`. Vercel их НЕ требует (web Portals не дёргает).
+     Railway-сборка теперь Node+Python (`nixpacks.toml`, `requirements.txt`).
+
 ## Структура
-- `src/app/` — 2 экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
-  (Мои пресеты). API-роуты: `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
+- `src/app/` — 3 экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
+  (Мои пресеты), `/volumes` (Объёмы — таблица рыночной статистики из Portals, инв. 9). Единая навигация:
+  общий `TopNav`/`MobileNav` из `layout.tsx` на ВСЕХ страницах (бокового `SideNav` больше нет). API-роуты:
+  `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
   gift-satellite, кэш), `api/model-previews/` (арт КАЖДОЙ модели из changes.tg + мин.цена из `/search`),
   `api/presets/` (GET/POST — upsert по коллекция+модель, повторное добавление **сливает** наборы фонов
   union'ом, не заменяет; POST заполняет `previewImageUrl` арт'ом модели) + `api/presets/[id]/` (DELETE),
-  `api/prices/` (триггер+статус),
+  `api/prices/` (триггер+статус), `api/volume/` (триггер+статус вкладки «Объёмы», `?period=`),
   `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
+- **Вкладка «Объёмы» (инв. 9):** компоненты `GetVolumeButton` (кнопка+дропдаун периода, поллинг),
+  `VolumeTable` (таблица, per-row бейдж `isPartial`); либы `portals.ts` (мост к Python-сайдкару +
+  health-check), `giftstat.ts` (keyless: blockchain_address + telegramId-фолбэк), `marketLinks.ts`,
+  `volumeRun.ts` (running-guard). Воркер `worker/volume.ts` + Python `worker/portals_fetch.py`
+  (осн. сбор) / `worker/portals_login.py` (одноразовый логин). Миграция таблиц — `scripts/migrate-volumes.ts`.
 - `src/components/` — витрина: `GetPricesButton` (триггер+поллинг, устойчив к смене вкладки через
   `visibilitychange`), `Showcase` (клиентская обёртка сетки: глобальная панель «Фильтр» — сортировка по цене
   + выбор площадок, localStorage; см. инв. 5), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/
@@ -166,9 +213,10 @@
   редкость), `trigger.ts` (прод-сигнал Railway / локальный spawn), `address.ts`.
 - `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`,
   `server.ts` (always-on HTTP-сервер для Railway, jobs `prices|scan`).
-- `prisma/` — `schema.prisma` (**12 моделей** + 6 enum; новые: `Preset` (`backdropNames String[]`, unique
-  по `collectionName+modelName`), `PriceRun`, `MarketListing`; `ScanStatus` переиспользован для `PriceRun`),
-  `seed.ts`.
+- `prisma/` — `schema.prisma` (**14 моделей** + 6 enum; новые: `Preset` (`backdropNames String[]`, unique
+  по `collectionName+modelName`), `PriceRun`, `MarketListing`, `VolumeRun` (`period`, `authOk`),
+  `CollectionVolume` (`volumeTon`, `isPartial`, `topModels`); `ScanStatus` переиспользован для
+  `PriceRun`/`VolumeRun`), `seed.ts` (+ `settings.volume`).
 
 ## Прод-заметки
 - Прод: Next на Vercel, воркер на always-on Railway (`worker:server`), БД — Neon. Триггер реализован
@@ -178,6 +226,13 @@
   `GIFT_SATELLITE_BASE_URL` опционально (дефолт уже верный). Арт подарков (`changesTg.ts` → api.changes.tg) —
   **keyless**, ключа не требует; `CHANGES_TG_BASE_URL` опционально. `DATABASE_URL` — Neon (в проде
   pooler-эндпоинт, `sslmode=require`).
+- **Вкладка «Объёмы» (инв. 9) — Telegram-секреты + Python на Railway-воркере:** `TELEGRAM_API_ID`,
+  `TELEGRAM_API_HASH`, `TELEGRAM_SESSION` (нужны воркеру: локальный spawn + Railway; Vercel НЕ требует).
+  `TELEGRAM_SESSION` генерится одноразово `npm run portals:login` (ЛИЧНЫЙ ввод телефона+кода). tma
+  истекает → health-check при старте `worker:server` и в начале каждого прогона объёма кричит в лог.
+  Опц. тюнинг: `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`, `PORTALS_THROTTLE_SEC`, `PYTHON_BIN`.
 - Один репозиторий, два сервиса: Vercel собирает web (`next build`), Railway — только воркер
   (`worker:server`, без `next build`). Railway build = `npm install --include=dev` (не `npm ci` —
   конфликт с cache-mount Nixpacks; `tsx` нужен воркеру в рантайме, Prisma client — через `postinstall`).
+  **Теперь воркер-сборка Node+Python** (`nixpacks.toml`: `python311`+`gcc`, `pip install -r requirements.txt`
+  для portalsmp/pyrogram/curl_cffi) — проверить деплой отдельно (условие 10). Vercel `nixpacks.toml` игнорит.

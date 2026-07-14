@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Settings, User } from "lucide-react";
+import { BarChart3, LayoutGrid, Settings, User } from "lucide-react";
 
-// Навигация PluTON v2: 2 экрана — Витрина (/) и Мои пресеты (/presets).
+// Навигация PluTON v2: 3 экрана — Витрина (/), Мои пресеты (/presets), Объёмы (/volumes).
 const NAV = [
   { href: "/", label: "Витрина", icon: LayoutGrid },
   { href: "/presets", label: "Мои пресеты", icon: Settings },
+  { href: "/volumes", label: "Объёмы", icon: BarChart3 },
 ];
 
 function isActive(pathname: string, href: string): boolean {
@@ -47,46 +48,6 @@ export function TopNav() {
         </div>
       </div>
     </nav>
-  );
-}
-
-export function SideNav() {
-  const pathname = usePathname();
-  return (
-    <aside className="sticky top-16 hidden h-[calc(100vh-64px)] w-64 shrink-0 flex-col border-r border-outline-variant bg-surface-container-low py-8 md:flex">
-      <div className="mb-8 px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-highest text-primary">
-            <User size={18} />
-          </div>
-          <div>
-            <div className="font-label-caps text-label-caps text-primary">PluTON</div>
-            <div className="text-[10px] uppercase tracking-widest text-on-surface-variant">Gift Tracker</div>
-          </div>
-        </div>
-      </div>
-      <nav className="flex-1 space-y-1">
-        {NAV.map((n) => {
-          const active = isActive(pathname, n.href);
-          const Icon = n.icon;
-          return (
-            <Link
-              key={n.href}
-              href={n.href}
-              className={
-                "flex items-center gap-3 px-6 py-3 transition-colors " +
-                (active
-                  ? "border-r-2 border-primary bg-surface-container-highest text-primary"
-                  : "text-on-surface-variant hover:bg-surface-container")
-              }
-            >
-              <Icon size={18} />
-              <span className="font-label-caps text-label-caps">{n.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-    </aside>
   );
 }
 
