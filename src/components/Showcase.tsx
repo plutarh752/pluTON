@@ -135,7 +135,13 @@ export function Showcase({ columns }: { columns: ColumnData[] }) {
                       <button
                         key={dir}
                         type="button"
-                        onClick={() => setSortDir(dir)}
+                        // Выбор направления — решающее одиночное действие: закрываем поповер, чтобы
+                        // переупорядоченные колонки сразу были видны (иначе на коротком столбце эффект
+                        // прячется за панелью и кажется, что сортировка «не применилась»).
+                        onClick={() => {
+                          setSortDir(dir);
+                          setOpen(false);
+                        }}
                         className={`flex items-center justify-center gap-1.5 rounded border px-2 py-2 font-mono text-[11px] transition-colors ${
                           active
                             ? "border-primary bg-primary text-on-primary"
