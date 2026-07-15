@@ -46,9 +46,9 @@
 
 - **Frontend:** Next.js 14 (App Router) + Tailwind + shadcn/ui + recharts
 - **Backend для скрейпа/аналитики:** отдельный Python-сервис (FastAPI), поскольку понадобится pandas для агрегаций и, возможно, потом scikit-learn
-- **База:** PostgreSQL (для локальной разработки — Docker Compose, для продакшена — Neon или Railway)
+- **База:** PostgreSQL (для локальной разработки — Docker Compose или Neon)
 - **Оркестрация локально:** Docker Compose (postgres + backend + frontend)
-- **Деплой:** Vercel для фронта, Railway для Python-бэка и БД (обсудим отдельно)
+- **Деплой:** проект работает только локально, облачный хостинг не используется
 
 ## Источники данных
 

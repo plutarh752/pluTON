@@ -14,7 +14,7 @@ Observe by driving the dev server, not by importing functions.
 PORT=3111 npm run dev   # background; needs .env with DATABASE_URL + GIFT_SATELLITE_KEY
 ```
 Poll `curl -s -o /dev/null -w '%{http_code}' http://localhost:3111/` until `200`.
-`WORKER_URL` empty locally ⇒ `POST /api/prices` **spawns `worker/prices.ts`** in-process (invariant 4).
+`POST /api/prices` **spawns `worker/prices.ts`** as a local detached process (invariant 4).
 
 ## Drive the price flow (the витрина engine)
 

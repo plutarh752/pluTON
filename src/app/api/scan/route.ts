@@ -32,7 +32,7 @@ export async function POST() {
   const left = await cooldownLeftSeconds();
   if (left > 0) return NextResponse.json({ error: "cooldown", secondsLeft: left }, { status: 409 });
 
-  // Прод: HTTP-сигнал воркеру на Railway; локально: spawn (см. src/lib/trigger.ts).
+  // Спавнит локальный процесс воркера (см. src/lib/trigger.ts).
   try {
     await triggerWorker("scan");
   } catch {

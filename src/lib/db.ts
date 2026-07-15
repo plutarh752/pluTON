@@ -4,7 +4,7 @@ import { Pool, neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
 
 // Neon driver adapter: Prisma ходит в БД по 443 (а не по TCP 5432).
-// Это штатный паттерн для Neon (в т.ч. Vercel serverless), а не костыль под машину.
+// Это штатный паттерн для Neon, а не костыль под машину.
 neonConfig.webSocketConstructor = ws;
 // Обычные (не-транзакционные) запросы гоним по HTTP fetch, а не по WebSocket —
 // иначе под webpack-бандлом Next.js ломается ws-маскирование (bufferUtil.mask).

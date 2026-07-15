@@ -1,11 +1,7 @@
 import { spawn } from "node:child_process";
 
-// Как веб-триггер запускает воркер:
-//   • ПРОД: HTTP-сигнал always-on воркеру (Railway) — POST WORKER_URL/run?job=…
-//     (не фоновый поллинг: воркер работает только по этому сигналу; данные всё так же тянутся
-//      лишь по кнопке «Скан»).
-//   • ЛОКАЛЬНО: spawn отдельного процесса (Vercel-serverless в проде не держит долгий скан,
-//     поэтому там воркер живёт на Railway).
+// Веб-триггер запускает воркер локальным detached-процессом — не блокирует HTTP-запрос.
+// Это НЕ фоновый поллинг: джоба стартует только по сигналу (кнопка «Получить цены»/«Получить объём»).
 export type Job = "scan" | "prices" | "volume";
 
 const SCRIPT: Record<Job, string> = {
@@ -15,26 +11,12 @@ const SCRIPT: Record<Job, string> = {
 };
 
 /**
- * Возвращает true, если триггер принят (202) или воркер уже занят (409 — это не ошибка вызова).
- * `runId` — если роут уже создал строку прогона (PriceRun/Scan/VolumeRun) синхронно для concurrency-guard'а,
- * прокидываем её id воркеру, чтобы он взял ЕЁ, а не создавал вторую (иначе TOCTOU-дубль прогона).
- * `period` — окно объёма (24h|7d|30d) для job="volume": пробрасываем в прод-URL и в локальные argv.
+ * `runId` — если роут уже создал строку прогона (PriceRun/Scan/VolumeRun) синхронно для
+ * concurrency-guard'а, прокидываем её id воркеру, чтобы он взял ЕЁ, а не создавал вторую
+ * (иначе TOCTOU-дубль прогона).
+ * `period` — окно объёма (24h|7d|30d) для job="volume".
  */
 export async function triggerWorker(job: Job, runId?: number, period?: string): Promise<boolean> {
-  const workerUrl = process.env.WORKER_URL;
-
-  if (workerUrl) {
-    const runParam = runId != null ? `&runId=${runId}` : "";
-    const periodParam = period ? `&period=${encodeURIComponent(period)}` : "";
-    const res = await fetch(`${workerUrl.replace(/\/$/, "")}/run?job=${job}${runParam}${periodParam}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${process.env.WORKER_TOKEN ?? ""}` },
-    });
-    if (res.ok || res.status === 409) return true;
-    throw new Error(`worker trigger failed: HTTP ${res.status}`);
-  }
-
-  // Локально: detached-процесс, не блокирует запрос и не упирается в лимит времени serverless.
   const args = [
     "tsx",
     SCRIPT[job],

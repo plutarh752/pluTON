@@ -16,8 +16,8 @@ const SIDECAR = path.join(process.cwd(), "worker", "portals_fetch.py");
 
 /** Спавнит python-сайдкар, собирает stdout, парсит JSON. Ненулевой exit → reject со stderr-текстом. */
 export async function runPortalsSidecar<T = unknown>(args: string[], timeoutMs = 180_000): Promise<T> {
-  // Telegram-креды теперь в БД (src/lib/secrets.ts), не в Railway/Vercel env — подмешиваем их в env
-  // дочернего процесса на спавне. Python-сайдкар не меняется: как читал os.environ.get(...), так и читает.
+  // Telegram-креды теперь в БД (src/lib/secrets.ts), не в env — подмешиваем их в env дочернего
+  // процесса на спавне. Python-сайдкар не меняется: как читал os.environ.get(...), так и читает.
   const creds = await getTelegramCreds();
   if (!creds.apiId || !creds.apiHash || !creds.session) {
     throw new Error("telegram_not_configured: заполни Telegram API ID/Hash/Session в Настройках (/settings)");

@@ -60,8 +60,8 @@ export function GetPricesButton({ cooldownLeft, running }: { cooldownLeft: numbe
   }, [running, checkStatus, ensurePolling, stopPolling]);
 
   // Устойчивость к смене вкладки/навигации: при возврате на видимую страницу немедленно берём свежий
-  // статус (воркер на Railway всё это время работал сам) и, если прогон ещё идёт, возобновляем поллинг —
-  // не полагаемся только на remount. В фоне (hidden) интервал гасим, чтобы не молотить впустую.
+  // статус (воркер всё это время работал сам как локальный процесс) и, если прогон ещё идёт,
+  // возобновляем поллинг — не полагаемся только на remount. В фоне (hidden) интервал гасим.
   useEffect(() => {
     function onVisibility() {
       if (document.visibilityState === "visible") {

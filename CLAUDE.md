@@ -17,8 +17,8 @@
   Дизайн Mono-Light Minimalist — токены в `tailwind.config.ts` (из Stitch-экспорта).
 - **Prisma 5.22 → Postgres на Neon** через **driver adapter (`@prisma/adapter-neon` + `@neondatabase/serverless`)**.
 - Воркер — отдельный процесс (`worker/*.ts`, запуск через `tsx`), не часть Next-рантайма.
-- **Задеплоено:** Vercel (web) + Railway (worker) + Neon (БД). Топология — `DEPLOY.md`.
-  Живые URL/грабли деплоя держатся в auto-memory, не в репозитории.
+- **Запускается только локально** — веб (`npm run dev`) и воркер-джобы как отдельные процессы на
+  своей машине, без облачного хостинга. Инструкция — `DEPLOY.md`.
 
 ## Команды
 - `npm run dev` — веб (Next).
@@ -30,9 +30,6 @@
   печатает session-строку для headless-минта tma; вставляется в `/settings` (не в `.env` — см. инв. 10).
   `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` тоже вводятся там же (my.telegram.org).
 - `npm run worker:scan [-- --force] [-- <address>]` — legacy tonapi-скан (каталог/on-chain/дельты, вне пути витрины).
-- `npm run worker:server` — always-on воркер-сервер (прод, Railway): слушает `POST /run?job=prices|scan|volume`
-  (Bearer `WORKER_TOKEN`) + `GET /health`. Спавнит джобу, HTTP остаётся отзывчивым (`worker/server.ts`).
-  **При старте печатает health-check Portals** (инвариант 9); сервер НЕ падает при протухшем tma.
 - `npm run db:seed` — сид settings + watchlist (идемпотентно).
 - `npm run typecheck` / `npm run build` — проверка перед завершением задач. `npm audit` = 0.
 - Миграции применяются **offline** (`prisma migrate diff --from-schema-datamodel <старая> --to-schema-datamodel
@@ -43,7 +40,7 @@
 1. **Neon только через driver adapter по 443 — НЕ прямой TCP 5432.** На этой машине PG-порт 5432
    недоступен (SSLRequest виснет). Прямой `postgresql://…:5432` даёт P1001. Рабочий путь — Neon
    serverless-драйвер (`src/lib/db.ts`: `neonConfig.poolQueryViaFetch = true`, запросы идут по HTTP/443).
-   Это штатный паттерн Neon (в т.ч. для Vercel), а не костыль. **Не «чинить» это возвратом к 5432.**
+   Это штатный паттерн Neon, а не костыль. **Не «чинить» это возвратом к 5432.**
    - Под webpack Next нативные пакеты адаптера вынесены в `serverExternalPackages` (`next.config.mjs`;
      в Next 15 ключ переехал из `experimental.serverComponentsExternalPackages` на верхний уровень) —
      иначе ломается `ws` (`bufferUtil.mask is not a function`).
@@ -101,13 +98,12 @@
    для legacy-скана.
 
 4. **Сбор только по кнопке. Никакого фонового поллинга/крона.** Триггер — POST `/api/prices`; статус
-   (поллинг) — GET `/api/prices`. Запуск воркера абстрагирован в `src/lib/trigger.ts`: **прод**
-   (`WORKER_URL` задан) → HTTP-сигнал Railway (`POST /run?job=prices`, Bearer `WORKER_TOKEN`); **локально**
-   (`WORKER_URL` пуст) → `spawn`. Джоба стартует только по сигналу. Cooldown/running-guard живут в
-   `/api/prices`, воркер-сервер их не дублирует. **`PriceRun{running}` создаётся синхронно в роуте ДО
-   спавна** (не в воркере) и его `runId` прокидывается воркеру (`--run-id` локально / `&runId=` в прод) —
-   иначе два быстрых POST спавнили два прогона (TOCTOU). Осиротевшую `running`-строку (воркер упал) роут
-   считает мёртвой через `STALE_RUNNING_MS` (10 мин), чтобы кнопка не залипала. Legacy-скан — тем же путём
+   (поллинг) — GET `/api/prices`. Запуск воркера абстрагирован в `src/lib/trigger.ts`: всегда `spawn`
+   локального detached-процесса (`tsx worker/*.ts`) — не блокирует HTTP-запрос. Джоба стартует только
+   по сигналу. Cooldown/running-guard живут в `/api/prices`. **`PriceRun{running}` создаётся синхронно
+   в роуте ДО спавна** (не в воркере) и его `runId` прокидывается воркеру (`--run-id=`) — иначе два
+   быстрых POST спавнили два прогона (TOCTOU). Осиротевшую `running`-строку (воркер упал) роут считает
+   мёртвой через `STALE_RUNNING_MS` (10 мин), чтобы кнопка не залипала. Legacy-скан — тем же путём
    (`job=scan`, `/api/scan`).
 
 5. **Прогон цен → снапшот в БД, витрина читает последний прогон.** `worker/prices.ts`: для каждого
@@ -162,7 +158,7 @@
      первый реальный прогон логирует `sample` — при расхождении поправить кандидаты).
    - **Health-check обязателен и громкий** (`assertPortalsAuth` в `src/lib/portals.ts`): при протухшем tma
      печатает жирный баннер в терминал (обнови сессию → `npm run portals:login`) и роняет прогон ДО обхода
-     коллекций. Зовётся: старт `worker:server`, первый шаг `worker/volume.ts`, `npm run portals:health`.
+     коллекций. Зовётся: первый шаг `worker/volume.ts`, `npm run portals:health`.
    - **Контур — как «Получить цены»** (инв. 4/5): кнопка «Получить объём» + дропдаун периода (24h/7d/30d,
      выбор ДО запуска) → `POST /api/volume?period=` создаёт `VolumeRun{running,period}` СИНХРОННО (TOCTOU) →
      `triggerWorker("volume", runId, period)` → снапшот в `CollectionVolume` → read-only `/volumes` читает
@@ -180,15 +176,16 @@
      Getgems по адресу; Portals/Fragment — вход в маркет).
    - **Секреты Telegram — из БД, не из env** (см. инв. 10): `runPortalsSidecar()` в `src/lib/portals.ts`
      читает `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION` через `getTelegramCreds()` и
-     подмешивает их в `env` при спавне `portals_fetch.py` (сам сайдкар не меняется). Vercel их не
-     требует (web Portals не дёргает). Railway-сборка теперь Node+Python (`nixpacks.toml`, `requirements.txt`).
+     подмешивает их в `env` при спавне `portals_fetch.py` (сам сайдкар не меняется). Локально нужен
+     установленный Python 3 (`pip install -r requirements.txt`) — Node просто спавнит его напрямую,
+     отдельного деплоя/сервера не требуется.
 
 10. **API-ключи хранятся зашифрованными в БД, НЕ в `.env`.** Проект шарится как папка с кодом — секреты в
     файлах утекли бы вместе с ней. `src/lib/secrets.ts`: одна строка `Setting{key:"secrets"}`, каждое из
     5 полей (`giftSatelliteKey`/`tonapiKey`/`telegramApiId`/`telegramApiHash`/`telegramSession`) — свой
     AES-256-GCM конверт (свой IV, можно менять/чистить поле не трогая остальные). Ключ шифрования —
-    `SETTINGS_ENCRYPTION_KEY` (env, `openssl rand -hex 32`, ОСТАЁТСЯ в `.env` — нужен и на Vercel, и на
-    Railway, оба читают/пишут секреты через общую БД). In-memory TTL-кэш 60с поверх ещё-зашифрованного
+    `SETTINGS_ENCRYPTION_KEY` (env, `openssl rand -hex 32`, живёт в локальном `.env`) — им
+    шифруются/расшифровываются секреты в БД. In-memory TTL-кэш 60с поверх ещё-зашифрованного
     значения (прогон воркера дёргает `getGiftSatelliteKey()` на каждый HTTP-вызов — без кэша сотни лишних
     round-trip'ов в Neon); `setSecrets()` инвалидирует кэш сразу.
     - **Ввод — экран `/settings`** (`src/app/settings/page.tsx` + `SettingsForm.tsx` + `api/settings/route.ts`).
@@ -249,33 +246,24 @@
   кэш-каталога + индикативная мин.цена модели из `/search`), `rates.ts` (курсы из settings),
   `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка по цветовой семье→тёмный→светлый),
   `format.ts` (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан, ключ через `secrets.ts`),
-  `scoring.ts` (только статистика/редкость), `trigger.ts` (прод-сигнал Railway / локальный spawn),
+  `scoring.ts` (только статистика/редкость), `trigger.ts` (локальный spawn воркер-джобы),
   `address.ts`.
-- `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`,
-  `server.ts` (always-on HTTP-сервер для Railway, jobs `prices|scan`).
+- `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`.
 - `prisma/` — `schema.prisma` (**14 моделей** + 6 enum; новые: `Preset` (`backdropNames String[]`, unique
   по `collectionName+modelName`), `PriceRun`, `MarketListing`, `VolumeRun` (`period`, `authOk`),
   `CollectionVolume` (`volumeTon`, `isPartial`, `topModels`); `ScanStatus` переиспользован для
   `PriceRun`/`VolumeRun`), `seed.ts` (+ `settings.volume`).
 
-## Прод-заметки
-- Прод: Next на Vercel, воркер на always-on Railway (`worker:server`), БД — Neon. Триггер реализован
-  (`src/lib/trigger.ts` → HTTP-сигнал Railway; локально — `spawn`). Инструкция — `DEPLOY.md`.
-- **`SETTINGS_ENCRYPTION_KEY` нужен В ОБОИХ сервисах** (Vercel и Railway, одинаковый, `openssl rand -hex 32`) —
-  им шифруются/расшифровываются `GIFT_SATELLITE_KEY`/`TONAPI_KEY`/`TELEGRAM_*` в БД (инв. 10). Сами ключи
-  вводятся ОДИН раз через `/settings` в веб-приложении — Vercel и Railway используют одну и ту же Neon БД,
-  воркер подхватывает их автоматически на следующем прогоне, дублировать в двух дашбордах больше не нужно.
-  Арт подарков (`changesTg.ts` → api.changes.tg) — **keyless**, ключа не требует; `CHANGES_TG_BASE_URL`
-  опционально. `DATABASE_URL` — Neon (в проде pooler-эндпоинт, `sslmode=require`), остаётся env-переменной
-  (нужен ДО того, как появится доступ к БД, где хранить остальные секреты).
-- **Вкладка «Объёмы» (инв. 9) — Python на Railway-воркере:** `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/
-  `TELEGRAM_SESSION` больше НЕ переменные окружения (см. выше) — вводятся через `/settings`.
-  `TELEGRAM_SESSION` генерится одноразово `npm run portals:login` (ЛИЧНЫЙ ввод телефона+кода). tma
-  истекает → health-check при старте `worker:server` и в начале каждого прогона объёма кричит в лог.
-  Опц. тюнинг (остаётся env): `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`,
-  `PORTALS_THROTTLE_SEC`, `PYTHON_BIN`.
-- Один репозиторий, два сервиса: Vercel собирает web (`next build`), Railway — только воркер
-  (`worker:server`, без `next build`). Railway build = `npm install --include=dev` (не `npm ci` —
-  конфликт с cache-mount Nixpacks; `tsx` нужен воркеру в рантайме, Prisma client — через `postinstall`).
-  **Теперь воркер-сборка Node+Python** (`nixpacks.toml`: `python311`+`gcc`, `pip install -r requirements.txt`
-  для portalsmp/pyrogram/curl_cffi) — проверить деплой отдельно (условие 10). Vercel `nixpacks.toml` игнорит.
+## Локальный запуск
+- Проект запускается **только локально**: веб (`npm run dev`) и воркер-джобы (спавнятся кнопками из UI
+  через `src/lib/trigger.ts`, либо вручную `npm run worker:prices|scan|volume`) — отдельные процессы на
+  своей машине, без облачного хостинга. БД — Neon (доступ по HTTP/443, см. инв. 1). Инструкция — `DEPLOY.md`.
+- `SETTINGS_ENCRYPTION_KEY` (`.env`, `openssl rand -hex 32`) шифрует `GIFT_SATELLITE_KEY`/`TONAPI_KEY`/
+  `TELEGRAM_*` в БД (инв. 10). Сами ключи вводятся ОДИН раз через `/settings` в приложении. Арт подарков
+  (`changesTg.ts` → api.changes.tg) — **keyless**, ключа не требует; `CHANGES_TG_BASE_URL` опционально.
+- **Вкладка «Объёмы» (инв. 9) — Python-сайдкар локально:** `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/
+  `TELEGRAM_SESSION` — не переменные окружения, вводятся через `/settings`. `TELEGRAM_SESSION` генерится
+  одноразово `npm run portals:login` (ЛИЧНЫЙ ввод телефона+кода). tma истекает → health-check в начале
+  каждого прогона объёма кричит в лог. Нужен установленный Python 3 (`pip install -r requirements.txt`).
+  Опц. тюнинг (env): `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`, `PORTALS_THROTTLE_SEC`,
+  `PYTHON_BIN`.
