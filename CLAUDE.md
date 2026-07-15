@@ -245,7 +245,31 @@
     - **Экран возврата** — `WelcomeBackOverlay.tsx` (не роут, `fixed`-оверлей в `layout.tsx`, НЕ оборачивает
       `{children}` структурно), показывается один раз за сессию вкладки браузера (`sessionStorage`), только
       если флаг стоит; будущий хук для фоновой подгрузки цен — маркер-комментарий внутри его `useEffect`
-      (сейчас не реализован).
+      (сейчас не реализован). **Фазовый таймлайн анимации** (`phase: reveal→flyby`): приветствие проявляется
+      пословно (крупнее/медленнее) → по `onDone` из `WordReveal` один раз позади текста пролетает планета
+      (`PlanetSphere` + `.planet-flyby`, ~2с, без деформации/взрыва) → `setVisible(false)`. Скрытие НЕ
+      зависит от проигрывания анимации; при reduced-motion — статичный текст ~1.2с без пролёта.
+    - **Анимации онбординга/возврата = система «Digital Serenity» + планета** (реф-механика из чужого
+      лендинга, адаптирована под чёрно-белую палитру). **Жёсткое разграничение участков:** (a) **заставка
+      мастера** (`step===0`) — атмосфера `SerenityBackdrop` (**только плавающие точки + рябь при клике**;
+      сетка, декоративные уголки и градиент за курсором убраны по требованию) + пословный `WordReveal`
+      заголовка/описания + планета **статична** в правом верхнем углу; (b) **шаги-поля 1..5 и «Готово»** —
+      атмосферы НЕТ, только планета: непрерывно живёт ВНЕ `key={step}`-контейнера (`OnboardingPlanet` в корне
+      формы, иначе remount сбрасывал бы деформацию), дрейфует из угла к центру + **нарастающая пульс-деформация**
+      (`.planet-wobble` = blob-морф `border-radius` **+** `pl-planet-pulse` асимметричный squish; амплитуда
+      `--amp` и скорость `--wobble-dur`/`--pulse-dur` РАСТУТ с каждым шагом → к финалу деформация сильная); на
+      «Финиш» — **взрыв: планета РАСПАДАЕТСЯ на логотипы TON** (`TonLogo` + `.planet-fragment`, phyllotaxis-кластер
+      → разлёт в разные стороны по per-fragment `--fx/--fy/--fr` + поворот; **сзади ничего не появляется** —
+      никакого центрального reveal), слой взрыва поднят на `z-40` над карточкой; всё параллельно сохранению
+      (оптимистично: `setExploding(true)` сразу, откат при ошибке), навигация после `Promise`-гонки `burst`/save
+      (`explodeMs` 1000/350мс); (c) **welcome-back** — атмосфера + `WordReveal` + одиночный пролёт (см. выше).
+      **reduced-motion — проектный allow-list:** все `@keyframes` и их классы лежат ВНУТРИ
+      `@media (prefers-reduced-motion: no-preference)` в `globals.css`, а базовые (вне блока) состояния =
+      финальные/видимые (`.word-animate{opacity:1}` и т.п.) — при reduce всё рисуется статично без залипания
+      в `opacity:0`; JS-эффекты (градиент за курсором, рябь, тайминги взрыва/пролёта) дополнительно гейтятся
+      через `usePrefersReducedMotion()` (`src/lib/usePrefersReducedMotion.ts`). **Client/server-граница:**
+      компоненты серии `src/components/serenity/*` и `onboarding/OnboardingPlanet.tsx` — клиентские; палитра
+      только монохром (чёрные/серые rgba, никакой slate-темы референса).
     - **Тест-команды:** `npm run onboarding:reset` бэкапит `secrets`/`onboarding` в
       `Setting{key:"_onboarding_test_backup"}` и чистит их (симуляция первого запуска — `/` редиректит на
       `/onboarding`); `npm run onboarding:restore` возвращает из бэкапа. `reset` отказывается работать, если
@@ -278,8 +302,13 @@
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
   `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); настройки: `SettingsForm`
   (ввод/очистка API-ключей, инв. 10); первый запуск (инв. 11): `OnboardingForm` (полноэкранный пошаговый
-  мастер: заставка → 5 шагов-полей со Skip/Next → «Готово»/«Финиш»), `WelcomeBackOverlay` (fixed-оверлей
-  возврата, sessionStorage); каркас: `Nav` (`TopNav`/`MobileNav`), `ProfileMenu` (fluid-меню
+  мастер: заставка → 5 шагов-полей со Skip/Next → «Готово»/«Финиш»; интегрирует планету/атмосферу/пословный
+  текст, взрыв на «Финиш»), `WelcomeBackOverlay` (fixed-оверлей возврата, sessionStorage; фазовый
+  таймлайн reveal→flyby); **анимации «Digital Serenity» + планета** (инв. 11) — `serenity/SerenityBackdrop`
+  (фоновая атмосфера: плавающие точки + рябь — БЕЗ сетки/уголков/градиента), `serenity/WordReveal` (пословное
+  появление + `onDone`), `serenity/PlanetSphere` (монохромный шар-визуал), `serenity/TonLogo` (монохромный
+  логотип TON — осколки взрыва), `onboarding/OnboardingPlanet`
+  (траектория угол→центр + нарастающая пульс-деформация + распад на TON-логотипы по `step`); каркас: `Nav` (`TopNav`/`MobileNav`), `ProfileMenu` (fluid-меню
   профиля в `TopNav`: круглые кнопки без подписей, выезжают вниз, триггер морфится профиль↔крестик;
   пункты — Ключ→`/settings`, Терминал-заглушка, Поддержка→t.me), `Footer` (в т.ч. обязательная
   атрибуция @GiftChanges).
@@ -295,7 +324,7 @@
   `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка по цветовой семье→тёмный→светлый),
   `format.ts` (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан, ключ через `secrets.ts`),
   `scoring.ts` (только статистика/редкость), `trigger.ts` (локальный spawn воркер-джобы),
-  `address.ts`.
+  `address.ts`, `usePrefersReducedMotion.ts` (клиентский хук — JS-гейт reduced-motion для анимаций инв. 11).
 - `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`.
 - `prisma/` — `schema.prisma` (**14 моделей** + 6 enum; новые: `Preset` (`backdropNames String[]`, unique
   по `collectionName+modelName`), `PriceRun`, `MarketListing`, `VolumeRun` (`period`, `authOk`),
