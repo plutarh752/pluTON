@@ -7,13 +7,14 @@
 // Хост API в доке не указан (только пути). Рабочий базовый URL подтверждён probe'ом (шаг 0):
 // gift-satellite.dev/api (api.gift-satellite.dev НЕ резолвится). Переопределяется через env.
 const BASE = (process.env.GIFT_SATELLITE_BASE_URL ?? "https://gift-satellite.dev/api").replace(/\/$/, "");
-const KEY = process.env.GIFT_SATELLITE_KEY ?? "";
+
+import { getGiftSatelliteKey } from "./secrets";
+import type { Market } from "./markets";
 
 // Константы маркетов вынесены в client-safe модуль (без process.env/сети) и ре-экспортируются здесь,
 // чтобы существующие импорты `from "@/lib/giftSatellite"` продолжали работать.
 export { MARKETS, marketLabel } from "./markets";
 export type { Market } from "./markets";
-import type { Market } from "./markets";
 
 // Лимиты (мс между запросами на КЛЮЧ лимитера). Ключ = маркет для /search, иначе имя эндпоинта.
 const INTERVALS: Record<string, number> = {
@@ -68,7 +69,8 @@ export class GiftSatellite {
       let lastErr: unknown;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         const headers: Record<string, string> = { Accept: "application/json", ...(init?.headers as Record<string, string>) };
-        if (KEY) headers.Authorization = `Token ${KEY}`;
+        const key = await getGiftSatelliteKey();
+        if (key) headers.Authorization = `Token ${key}`;
         let res: Response;
         try {
           res = await fetch(`${BASE}${path}`, { ...init, headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });

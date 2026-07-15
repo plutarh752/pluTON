@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, LayoutGrid, Settings, User } from "lucide-react";
+import { BarChart3, KeyRound, LayoutGrid, Settings } from "lucide-react";
 
 // Навигация PluTON v2: 3 экрана — Витрина (/), Мои пресеты (/presets), Объёмы (/volumes).
 const NAV = [
@@ -43,9 +43,18 @@ export function TopNav() {
             })}
           </div>
         </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-outline-variant bg-surface-container text-primary">
-          <User size={18} />
-        </div>
+        <Link
+          href="/settings"
+          aria-label="Настройки API-ключей"
+          className={
+            "flex h-10 w-10 items-center justify-center rounded-full border bg-surface-container transition-colors " +
+            (isActive(pathname, "/settings")
+              ? "border-primary text-primary"
+              : "border-outline-variant text-on-surface-variant hover:text-primary")
+          }
+        >
+          <KeyRound size={18} />
+        </Link>
       </div>
     </nav>
   );

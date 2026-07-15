@@ -1,7 +1,7 @@
 import { GiftImage } from "./GiftImage";
 import { LotPrice } from "./LotPrice";
 import { FloorChip } from "./FloorChip";
-import { marketLabel } from "@/lib/giftSatellite";
+import { marketLabel } from "@/lib/markets";
 
 export interface LotView {
   id: number;

@@ -23,10 +23,12 @@ export function GetVolumeButton({
   period,
   cooldownLeft,
   running,
+  configured = true,
 }: {
   period: string;
   cooldownLeft: number;
   running: boolean;
+  configured?: boolean;
 }) {
   const router = useRouter();
   const [left, setLeft] = useState(cooldownLeft);
@@ -106,6 +108,8 @@ export function GetVolumeButton({
         setMsg("Ещё идёт cooldown");
       } else if (d.error === "already_running") {
         setMsg("Прогон уже идёт");
+      } else if (d.error === "telegram_not_configured") {
+        setMsg("Telegram не настроен — заполни ключи в Настройках");
       } else {
         setMsg("Ошибка запуска");
       }
@@ -114,7 +118,7 @@ export function GetVolumeButton({
     }
   }
 
-  const disabled = busy || running || left > 0;
+  const disabled = busy || running || left > 0 || !configured;
   const label = running ? "Сбор идёт…" : left > 0 ? `Получить объём (через ${fmt(left)})` : "Получить объём";
 
   return (

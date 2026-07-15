@@ -9,6 +9,7 @@ import { GiftSatellite } from "@/lib/giftSatellite";
 import { collectionIdMap } from "@/lib/giftPreviews";
 import { changesModelImageUrl } from "@/lib/changesTg";
 import { freshRunningRun } from "@/lib/priceRun";
+import { requireGiftSatelliteConfigured } from "@/lib/requireConfigured";
 
 // Экран «Витрина» (Global Price Index): кнопка «Получить цены» + колонки по пресетам (одна модель = один
 // столбец), внутри столбца — секции по каждому фону.
@@ -25,6 +26,7 @@ function isDegraded(marketStatus: unknown, presetId: number): boolean {
 
 export default async function Home() {
   noStore();
+  await requireGiftSatelliteConfigured("/");
 
   const [presets, lastRun, running, pricesSetting, lastOk] = await Promise.all([
     prisma.preset.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),

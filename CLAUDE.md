@@ -27,7 +27,8 @@
   движок вкладки «Объёмы»). Первым шагом — health-check Portals-авторизации (см. инвариант 9).
 - `npm run portals:health` — ручной health-check Portals-tma («✅ Portals auth OK» или громкий баннер + exit 1).
 - `npm run portals:login` — одноразовый интерактивный вход в Telegram (ввод телефона+кода ЛИЧНО) →
-  печатает `TELEGRAM_SESSION` для headless-минта tma. Требует `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`.
+  печатает session-строку для headless-минта tma; вставляется в `/settings` (не в `.env` — см. инв. 10).
+  `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` тоже вводятся там же (my.telegram.org).
 - `npm run worker:scan [-- --force] [-- <address>]` — legacy tonapi-скан (каталог/on-chain/дельты, вне пути витрины).
 - `npm run worker:server` — always-on воркер-сервер (прод, Railway): слушает `POST /run?job=prices|scan|volume`
   (Bearer `WORKER_TOKEN`) + `GET /health`. Спавнит джобу, HTTP остаётся отзывчивым (`worker/server.ts`).
@@ -49,8 +50,10 @@
 
 2. **Источник новой механики — gift-satellite.dev (мультимаркет). tonapi — вспомогательный.**
    `src/lib/giftSatellite.ts`: auth-заголовок **`Authorization: Token <GIFT_SATELLITE_KEY>` (НЕ Bearer)**;
-   базовый URL **`https://gift-satellite.dev/api`** (подтверждён probe'ом; `api.gift-satellite.dev` НЕ
-   резолвится; переопределяется `GIFT_SATELLITE_BASE_URL`). Per-endpoint троттлинг под лимиты: markets 2/s,
+   ключ читается асинхронно из БД через `getGiftSatelliteKey()` (`src/lib/secrets.ts`), НЕ из
+   `process.env` — см. инв. 10. Базовый URL **`https://gift-satellite.dev/api`** (подтверждён probe'ом;
+   `api.gift-satellite.dev` НЕ резолвится; переопределяется `GIFT_SATELLITE_BASE_URL`, это остаётся
+   env-переменной). Per-endpoint троттлинг под лимиты: markets 2/s,
    `tg` 1/1.5s, collection-offers 1/s, gift 4/s. Эндпоинты: `/gift/collections`, `/gift/collection/:name`
    (модели/фоны для dropdown'ов), `/search/{tg,portals,tonnel,mrkt,getgems}/:collection?models=&backdrops=`
    (≤50 лотов, `normalizedPrice` в TON), `/history/collection-offers` (floor по маркетам).
@@ -175,20 +178,51 @@
      (gift-satellite) с фолбэком на Giftstat. `blockchain_address` (ссылка на Getgems) — из keyless Giftstat
      (`src/lib/giftstat.ts`). Ссылки на маркеты — `src/lib/marketLinks.ts` (надёжен per-collection только
      Getgems по адресу; Portals/Fragment — вход в маркет).
-   - **Секреты Telegram — В ОБОИХ местах, где живёт сайдкар:** воркер (локально спавн, прод Railway):
-     `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION`. Vercel их НЕ требует (web Portals не дёргает).
-     Railway-сборка теперь Node+Python (`nixpacks.toml`, `requirements.txt`).
+   - **Секреты Telegram — из БД, не из env** (см. инв. 10): `runPortalsSidecar()` в `src/lib/portals.ts`
+     читает `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION` через `getTelegramCreds()` и
+     подмешивает их в `env` при спавне `portals_fetch.py` (сам сайдкар не меняется). Vercel их не
+     требует (web Portals не дёргает). Railway-сборка теперь Node+Python (`nixpacks.toml`, `requirements.txt`).
+
+10. **API-ключи хранятся зашифрованными в БД, НЕ в `.env`.** Проект шарится как папка с кодом — секреты в
+    файлах утекли бы вместе с ней. `src/lib/secrets.ts`: одна строка `Setting{key:"secrets"}`, каждое из
+    5 полей (`giftSatelliteKey`/`tonapiKey`/`telegramApiId`/`telegramApiHash`/`telegramSession`) — свой
+    AES-256-GCM конверт (свой IV, можно менять/чистить поле не трогая остальные). Ключ шифрования —
+    `SETTINGS_ENCRYPTION_KEY` (env, `openssl rand -hex 32`, ОСТАЁТСЯ в `.env` — нужен и на Vercel, и на
+    Railway, оба читают/пишут секреты через общую БД). In-memory TTL-кэш 60с поверх ещё-зашифрованного
+    значения (прогон воркера дёргает `getGiftSatelliteKey()` на каждый HTTP-вызов — без кэша сотни лишних
+    round-trip'ов в Neon); `setSecrets()` инвалидирует кэш сразу.
+    - **Ввод — экран `/settings`** (`src/app/settings/page.tsx` + `SettingsForm.tsx` + `api/settings/route.ts`).
+      `GET` отдаёт только booleans (задано/нет) — плейнтекст секретов клиенту не возвращается никогда;
+      пустое поле при сабмите = «не менять», явная кнопка «очистить» = удалить. После сохранения
+      `giftSatelliteKey` сразу вызывается `GiftSatellite.getCollections()` как дешёвая проверка ключа —
+      баннер-подсказка в ответе, сохранение не блокирует.
+    - **Гейт — только `GIFT_SATELLITE_KEY`** (`src/lib/requireConfigured.ts`, framework-aware `redirect()`,
+      поэтому НЕ в `secrets.ts`, который импортируют голые tsx-воркеры без Next-рантайма). Без него `/`,
+      `/presets`, `/volumes` редиректят на `/settings?next=...`. `TONAPI_KEY` опционален (free tier 1 RPS
+      работает без него), ничего не блокирует. Telegram-креды **тоже не блокируют вход** — их отсутствие
+      только отключает кнопку «Получить объём» (мягкий гейт: `isTelegramConfigured()` в
+      `api/volume/route.ts` POST + `volumes/page.tsx`, amber-плашка со ссылкой на `/settings`), без
+      редиректа. Это НЕ аутентификация приложения — гейт закрывает только «нет ключа», не «незнакомый
+      посетитель»; логина/сессий в проекте нет.
+    - **Client/server-граница обязательна:** `secrets.ts` использует `node:crypto` — server-only. Клиентские
+      компоненты берут `Market`/`marketLabel` из `src/lib/markets.ts` напрямую, **НЕ** из `giftSatellite.ts`
+      (тот теперь тянет `secrets.ts`) — иначе webpack падает на сборке (`UnhandledSchemeError: node:crypto`),
+      т.к. тащит серверный модуль в client-бандл. Ловили на `LotCard.tsx` при первой сборке после этого
+      рефакторинга — если появится новый клиентский импорт из `giftSatellite.ts`, чинить так же.
 
 ## Структура
-- `src/app/` — 3 экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
-  (Мои пресеты), `/volumes` (Объёмы — таблица рыночной статистики из Portals, инв. 9). Единая навигация:
-  общий `TopNav`/`MobileNav` из `layout.tsx` на ВСЕХ страницах (бокового `SideNav` больше нет). API-роуты:
-  `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
+- `src/app/` — 3 основных экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
+  (Мои пресеты), `/volumes` (Объёмы — таблица рыночной статистики из Portals, инв. 9); плюс `/settings`
+  (ввод API-ключей, инв. 10) — не в основной навигации-табах, точка входа — иконка-ключ в `TopNav`. Единая
+  навигация: общий `TopNav`/`MobileNav` из `layout.tsx` на ВСЕХ страницах (бокового `SideNav` больше нет).
+  API-роуты: `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
   gift-satellite, кэш), `api/model-previews/` (арт КАЖДОЙ модели из changes.tg + мин.цена из `/search`),
   `api/presets/` (GET/POST — upsert по коллекция+модель, повторное добавление **сливает** наборы фонов
   union'ом, не заменяет; POST заполняет `previewImageUrl` арт'ом модели) + `api/presets/[id]/` (DELETE),
-  `api/prices/` (триггер+статус), `api/volume/` (триггер+статус вкладки «Объёмы», `?period=`),
-  `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
+  `api/prices/` (триггер+статус), `api/volume/` (триггер+статус вкладки «Объёмы», `?period=`,
+  409 `telegram_not_configured` без Telegram-кредов), `api/settings/` (GET статус/POST сохранение
+  ключей, инв. 10), `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+**
+  `unstable_noStore()`.
 - **Вкладка «Объёмы» (инв. 9):** компоненты `GetVolumeButton` (кнопка+дропдаун периода, поллинг),
   `VolumeTable` (таблица, per-row бейдж `isPartial`); либы `portals.ts` (мост к Python-сайдкару +
   health-check), `giftstat.ts` (keyless: blockchain_address + telegramId-фолбэк), `marketLinks.ts`,
@@ -199,18 +233,20 @@
   + выбор площадок, localStorage; см. инв. 5), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/
   `LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
-  `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); каркас: `Nav`, `Footer`
-  (в т.ч. обязательная атрибуция @GiftChanges).
-- `src/lib/` — `db.ts` (Prisma+Neon), `giftSatellite.ts` (осн. источник), `markets.ts` (client-safe
-  константы маркетов `Market`/`MARKETS`/`marketLabel` — без `process.env`/сети; `giftSatellite` их
-  РЕ-ЭКСПОРТИРУЕТ, поэтому существующие импорты `from "@/lib/giftSatellite"` не тронуты, а клиентский
-  `Showcase` берёт их отсюда, не таща API-клиент в бандл), `gsCache.ts` (кэш каталога),
-  `changesTg.ts` (детерм. URL арта модели/коллекции из api.changes.tg по telegramId), `giftPreviews.ts`
-  (резолвер `collectionName→telegramId` из кэш-каталога + индикативная мин.цена модели из `/search`),
-  `rates.ts` (курсы из settings), `backdropColors.ts` (палитра фонов Telegram: имя→hex,
-  сортировка по цветовой семье→тёмный→светлый), `format.ts`
-  (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан), `scoring.ts` (только статистика/
-  редкость), `trigger.ts` (прод-сигнал Railway / локальный spawn), `address.ts`.
+  `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); настройки: `SettingsForm`
+  (ввод/очистка API-ключей, инв. 10); каркас: `Nav`, `Footer` (в т.ч. обязательная атрибуция @GiftChanges).
+- `src/lib/` — `db.ts` (Prisma+Neon), `secrets.ts` (шифрование API-ключей в БД, инв. 10),
+  `requireConfigured.ts` (гейт по `GIFT_SATELLITE_KEY`), `giftSatellite.ts` (осн. источник, ключ через
+  `secrets.ts`), `markets.ts` (client-safe константы маркетов `Market`/`MARKETS`/`marketLabel` — без
+  `process.env`/сети/`node:crypto`; `giftSatellite` их РЕ-ЭКСПОРТИРУЕТ для серверных импортов, но
+  клиентские компоненты берут их **напрямую отсюда**, не из `giftSatellite.ts` — см. инв. 10 про
+  client/server-границу), `gsCache.ts` (кэш каталога), `changesTg.ts` (детерм. URL арта модели/коллекции
+  из api.changes.tg по telegramId), `giftPreviews.ts` (резолвер `collectionName→telegramId` из
+  кэш-каталога + индикативная мин.цена модели из `/search`), `rates.ts` (курсы из settings),
+  `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка по цветовой семье→тёмный→светлый),
+  `format.ts` (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан, ключ через `secrets.ts`),
+  `scoring.ts` (только статистика/редкость), `trigger.ts` (прод-сигнал Railway / локальный spawn),
+  `address.ts`.
 - `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`,
   `server.ts` (always-on HTTP-сервер для Railway, jobs `prices|scan`).
 - `prisma/` — `schema.prisma` (**14 моделей** + 6 enum; новые: `Preset` (`backdropNames String[]`, unique
@@ -221,16 +257,19 @@
 ## Прод-заметки
 - Прод: Next на Vercel, воркер на always-on Railway (`worker:server`), БД — Neon. Триггер реализован
   (`src/lib/trigger.ts` → HTTP-сигнал Railway; локально — `spawn`). Инструкция — `DEPLOY.md`.
-- **`GIFT_SATELLITE_KEY` нужен В ОБОИХ сервисах:** Vercel (для `/api/collections`, `/api/attributes`,
-  `/api/model-previews`, валидации/фото пресетов, резолва telegramId) **и** Railway (для `worker/prices.ts`).
-  `GIFT_SATELLITE_BASE_URL` опционально (дефолт уже верный). Арт подарков (`changesTg.ts` → api.changes.tg) —
-  **keyless**, ключа не требует; `CHANGES_TG_BASE_URL` опционально. `DATABASE_URL` — Neon (в проде
-  pooler-эндпоинт, `sslmode=require`).
-- **Вкладка «Объёмы» (инв. 9) — Telegram-секреты + Python на Railway-воркере:** `TELEGRAM_API_ID`,
-  `TELEGRAM_API_HASH`, `TELEGRAM_SESSION` (нужны воркеру: локальный spawn + Railway; Vercel НЕ требует).
+- **`SETTINGS_ENCRYPTION_KEY` нужен В ОБОИХ сервисах** (Vercel и Railway, одинаковый, `openssl rand -hex 32`) —
+  им шифруются/расшифровываются `GIFT_SATELLITE_KEY`/`TONAPI_KEY`/`TELEGRAM_*` в БД (инв. 10). Сами ключи
+  вводятся ОДИН раз через `/settings` в веб-приложении — Vercel и Railway используют одну и ту же Neon БД,
+  воркер подхватывает их автоматически на следующем прогоне, дублировать в двух дашбордах больше не нужно.
+  Арт подарков (`changesTg.ts` → api.changes.tg) — **keyless**, ключа не требует; `CHANGES_TG_BASE_URL`
+  опционально. `DATABASE_URL` — Neon (в проде pooler-эндпоинт, `sslmode=require`), остаётся env-переменной
+  (нужен ДО того, как появится доступ к БД, где хранить остальные секреты).
+- **Вкладка «Объёмы» (инв. 9) — Python на Railway-воркере:** `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/
+  `TELEGRAM_SESSION` больше НЕ переменные окружения (см. выше) — вводятся через `/settings`.
   `TELEGRAM_SESSION` генерится одноразово `npm run portals:login` (ЛИЧНЫЙ ввод телефона+кода). tma
   истекает → health-check при старте `worker:server` и в начале каждого прогона объёма кричит в лог.
-  Опц. тюнинг: `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`, `PORTALS_THROTTLE_SEC`, `PYTHON_BIN`.
+  Опц. тюнинг (остаётся env): `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`,
+  `PORTALS_THROTTLE_SEC`, `PYTHON_BIN`.
 - Один репозиторий, два сервиса: Vercel собирает web (`next build`), Railway — только воркер
   (`worker:server`, без `next build`). Railway build = `npm install --include=dev` (не `npm ci` —
   конфликт с cache-mount Nixpacks; `tsx` нужен воркеру в рантайме, Prisma client — через `postinstall`).

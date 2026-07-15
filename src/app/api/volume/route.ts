@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { triggerWorker } from "@/lib/trigger";
 import { freshVolumeRun } from "@/lib/volumeRun";
+import { isTelegramConfigured } from "@/lib/secrets";
 
 // Кнопка «Получить объём» (вкладка «Объёмы»): триггер прогона Portals + статус для поллинга.
 // Аналог /api/prices, но с окном периода (24h|7d|30d), выбираемым ДО запуска.
@@ -43,6 +44,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const period = parsePeriod(req);
+
+  if (!(await isTelegramConfigured())) {
+    return NextResponse.json({ error: "telegram_not_configured" }, { status: 409 });
+  }
 
   // TOCTOU-fix (инвариант 4): строку прогона создаём СИНХРОННО до спавна воркера — второй быстрый POST
   // увидит running и получит 409. Running-guard глобальный (один прогон Portals за раз — щадим маркет).

@@ -5,12 +5,14 @@ import { PresetList } from "@/components/PresetList";
 import { GiftSatellite } from "@/lib/giftSatellite";
 import { collectionIdMap } from "@/lib/giftPreviews";
 import { changesModelImageUrl } from "@/lib/changesTg";
+import { requireGiftSatelliteConfigured } from "@/lib/requireConfigured";
 
 // Экран «Мои пресеты»: каскадная форма + список сохранённых комбинаций.
 export const dynamic = "force-dynamic";
 
 export default async function PresetsPage() {
   noStore();
+  await requireGiftSatelliteConfigured("/presets");
   const presets = await prisma.preset.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
 
   // Фото пресета = чистый арт модели из changes.tg, считаем НА РЕНДЕРЕ по telegramId (детерминированно) —

@@ -1,8 +1,9 @@
 // Клиент tonapi.io. Единственный источник данных MVP (см. план §0).
 // Free tier = 1 RPS → встроенный лимитер; пагинация коллекции limit=1000 (спайк: ~3 запроса на коллекцию).
 
+import { getTonapiKey } from "./secrets";
+
 const BASE = process.env.TONAPI_BASE_URL ?? "https://tonapi.io/v2";
-const KEY = process.env.TONAPI_KEY ?? "";
 const MIN_INTERVAL_MS = 1100; // 1 RPS с запасом
 const PAGE = 1000;
 
@@ -49,7 +50,8 @@ export class TonApi {
   private async get<T>(path: string): Promise<T> {
     await this.throttle();
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (KEY) headers.Authorization = `Bearer ${KEY}`;
+    const key = await getTonapiKey();
+    if (key) headers.Authorization = `Bearer ${key}`;
     const res = await fetch(`${BASE}${path}`, { headers });
     if (!res.ok) throw new Error(`tonapi ${res.status} on ${path}: ${(await res.text()).slice(0, 200)}`);
     return (await res.json()) as T;

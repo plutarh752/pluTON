@@ -20,13 +20,19 @@
 
 ---
 
-## 0. Общий секрет
+## 0. Общие секреты
 
-Сгенерируй `WORKER_TOKEN` (одинаковый на Vercel и Railway):
+Сгенерируй `WORKER_TOKEN` и `SETTINGS_ENCRYPTION_KEY` (оба — одинаковые на Vercel и Railway):
 
 ```bash
-openssl rand -hex 32
+openssl rand -hex 32   # WORKER_TOKEN
+openssl rand -hex 32   # SETTINGS_ENCRYPTION_KEY
 ```
+
+`SETTINGS_ENCRYPTION_KEY` шифрует API-ключи (`GIFT_SATELLITE_KEY`/`TONAPI_KEY`/`TELEGRAM_*`), которые
+хранятся в Neon (`Setting`, AES-256-GCM), а не в переменных окружения — их вводишь один раз через
+веб-форму `/settings` в самом приложении. Vercel и Railway используют одну и ту же БД, поэтому воркер
+подхватывает их автоматически, без ручного дублирования в двух дашбордах (см. CLAUDE.md, `src/lib/secrets.ts`).
 
 ## 1. Neon (БД)
 
@@ -47,9 +53,11 @@ DATABASE_URL=... npm run db:seed   # settings + watchlist (идемпотент�
    - healthcheck: `/health`.
 3. Variables:
    - `DATABASE_URL` — та же строка Neon.
-   - `WORKER_TOKEN` — секрет из шага 0.
-   - `TONAPI_BASE_URL=https://tonapi.io/v2` (и `TONAPI_KEY`, если есть).
+   - `WORKER_TOKEN`, `SETTINGS_ENCRYPTION_KEY` — секреты из шага 0.
+   - `TONAPI_BASE_URL=https://tonapi.io/v2`.
    - `PORT` Railway задаёт сам; сервер его читает.
+   - `GIFT_SATELLITE_KEY`/`TONAPI_KEY`/`TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION` сюда
+     вписывать НЕ нужно — вводятся один раз через `/settings` в приложении, воркер читает их из БД.
 4. Networking → Generate Domain. Публичный URL (напр. `https://pluton-worker.up.railway.app`) → это `WORKER_URL` для Vercel.
 5. Проверка: `curl https://<worker>/health` → `ok`.
 
@@ -59,8 +67,9 @@ DATABASE_URL=... npm run db:seed   # settings + watchlist (идемпотент�
 2. Environment Variables:
    - `DATABASE_URL` — Neon.
    - `WORKER_URL` — публичный URL воркера с Railway (шаг 2.4).
-   - `WORKER_TOKEN` — тот же секрет.
-   - `TONAPI_BASE_URL`, `TONAPI_KEY` (опц.).
+   - `WORKER_TOKEN`, `SETTINGS_ENCRYPTION_KEY` — те же секреты, что на Railway.
+   - `TONAPI_BASE_URL`.
+   - `GIFT_SATELLITE_KEY`/`TONAPI_KEY`/`TELEGRAM_*` сюда НЕ нужны — вводятся через `/settings`.
 3. Deploy.
 
 ## 4. Проверка end-to-end
@@ -95,19 +104,21 @@ DATABASE_URL=... npm run db:seed   # settings + watchlist (идемпотент�
 ### 5.1 Одноразовый Telegram-логин (ЛИЧНО, локально)
 
 ```bash
-export TELEGRAM_API_ID=...      # my.telegram.org → API development tools
-export TELEGRAM_API_HASH=...
-npm run portals:login           # спросит номер телефона + код (и 2FA-пароль, если включён)
-# → печатает TELEGRAM_SESSION=... — скопируй в .env (локально) и в Railway-variables (прод)
-npm run portals:health          # проверка: «✅ Portals auth OK»
+npm run portals:login           # спросит TELEGRAM_API_ID/HASH (если их нет в env) + номер телефона + код
+                                 # (и 2FA-пароль, если включён)
+# → печатает session-строку — вставь её в приложении на странице /settings (поле «Telegram Session»,
+#   вместе с API ID/Hash) — БД общая для веба и воркера, дублировать в Railway не нужно
+npm run portals:health          # проверка: «✅ Portals auth OK» (требует уже сохранённых в /settings кредов)
 ```
 
 `tma` истекает → health-check при старте `worker:server` и в начале каждого прогона объёма кричит в лог
-громким баннером «❌ PORTALS AUTH DEAD». Тогда повтори `npm run portals:login` и обнови `TELEGRAM_SESSION`.
+громким баннером «❌ PORTALS AUTH DEAD». Тогда повтори `npm run portals:login` и обнови Telegram Session
+в `/settings`.
 
 ### 5.2 Railway (воркер): Node + Python
 
-- Новые variables: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION` (+ уже имеющиеся).
+- Новых переменных окружения не требуется — `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION`
+  хранятся в БД (см. шаг 0, `SETTINGS_ENCRYPTION_KEY`) и вводятся один раз через `/settings`.
 - Сборка Node+Python описана в `nixpacks.toml` (`python311` + `gcc`, `pip install -r requirements.txt`).
   **Проверь деплой:** в логах билда — установка portalsmp/pyrogram/curl_cffi; при старте — строка
   health-check. Если Nixpacks не подхватил Python — задай в Railway Build Command явно

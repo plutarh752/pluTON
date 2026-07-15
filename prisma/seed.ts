@@ -24,9 +24,8 @@ const SETTINGS: Record<string, unknown> = {
     cooldown_minutes: 15, // кнопка «Получить объём» (Portals) — тяжёлый прогон, реже
     collections_limit: 500, // сколько коллекций тянуть из Portals /collections
   },
-  tonapi: {
-    api_key: "", // free tier (1 RPS) ключа не требует
-  },
+  // API-ключи (GIFT_SATELLITE_KEY/TONAPI_KEY/TELEGRAM_*) НЕ сидируются — вводятся через /settings,
+  // хранятся зашифрованными под ключом "secrets" (см. src/lib/secrets.ts).
 };
 
 // Стартовый watchlist (подтверждён спайком: единый формат осей, цены в TON).

@@ -1,8 +1,11 @@
+import Link from "next/link";
 import { unstable_noStore as noStore } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getRates } from "@/lib/rates";
 import { freshVolumeRun } from "@/lib/volumeRun";
 import { changesOriginalImageUrl } from "@/lib/changesTg";
+import { isTelegramConfigured } from "@/lib/secrets";
+import { requireGiftSatelliteConfigured } from "@/lib/requireConfigured";
 import { GetVolumeButton } from "@/components/GetVolumeButton";
 import { VolumeTable, type VolumeRow } from "@/components/VolumeTable";
 
@@ -21,8 +24,9 @@ export default async function VolumesPage({
   noStore();
   const sp = await searchParams;
   const period = sp?.period && PERIODS.has(sp.period) ? sp.period : "24h";
+  await requireGiftSatelliteConfigured(`/volumes?period=${period}`);
 
-  const [lastRun, running, volumeSetting, lastOk, rates] = await Promise.all([
+  const [lastRun, running, volumeSetting, lastOk, rates, telegramConfigured] = await Promise.all([
     prisma.volumeRun.findFirst({ where: { period }, orderBy: { startedAt: "desc" } }),
     // Свежий running (с учётом STALE) — залипший прогон не должен держать кнопку disabled навсегда.
     freshVolumeRun(),
@@ -32,6 +36,7 @@ export default async function VolumesPage({
       orderBy: { startedAt: "desc" },
     }),
     getRates(),
+    isTelegramConfigured(),
   ]);
 
   const cooldownMin = (volumeSetting?.value as { cooldown_minutes?: number } | null)?.cooldown_minutes ?? 15;
@@ -72,11 +77,24 @@ export default async function VolumesPage({
           Рыночная статистика по всем коллекциям: floor, объём торгов, последняя продажа и топ-3 продаваемых
           модели. Данные — реальный объём с Portals.
         </p>
-        <GetVolumeButton period={period} cooldownLeft={cooldownLeft} running={!!running} />
-        {authDead && (
+        <GetVolumeButton
+          period={period}
+          cooldownLeft={cooldownLeft}
+          running={!!running}
+          configured={telegramConfigured}
+        />
+        {!telegramConfigured && (
+          <p className="mt-4 max-w-xl rounded border border-amber-500/40 bg-amber-500/10 px-4 py-2 font-mono text-[11px] text-amber-600">
+            ⚠ Telegram не настроен — сбор объёма недоступен.{" "}
+            <Link href={`/settings?next=${encodeURIComponent(`/volumes?period=${period}`)}`} className="underline">
+              Настроить →
+            </Link>
+          </p>
+        )}
+        {telegramConfigured && authDead && (
           <p className="mt-4 max-w-xl rounded border border-amber-500/40 bg-amber-500/10 px-4 py-2 font-mono text-[11px] text-amber-600">
             ⚠ Portals-авторизация протухла — обнови Telegram-сессию: <code>npm run portals:login</code> →
-            TELEGRAM_SESSION.
+            вставь новую сессию в <Link href="/settings" className="underline">Настройках</Link>.
           </p>
         )}
       </section>

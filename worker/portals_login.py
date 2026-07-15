@@ -4,9 +4,10 @@
 (Portals-авторизация вкладки «Объёмы»). ТРЕБУЕТ живого ввода номера телефона + кода подтверждения.
 
 Запуск:  npm run portals:login   (или: python3 worker/portals_login.py)
-Нужны env TELEGRAM_API_ID / TELEGRAM_API_HASH (my.telegram.org → API development tools). Скрипт запросит
-телефон и код. Полученную строку положи в .env как TELEGRAM_SESSION (и в Railway-variables на проде).
-Сессия не хранит пароль; при 2FA спросит облачный пароль. Строку НЕ коммитить.
+Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH (my.telegram.org → API development tools) — если их нет в env,
+скрипт спросит интерактивно. Полученную session-строку вставь в приложении на странице /settings (поле
+«Telegram Session») — БД общая для веба и воркера, дублировать в Railway не нужно. Сессия не хранит
+пароль; при 2FA спросит облачный пароль. Строку НЕ коммитить и никуда не публиковать.
 """
 import asyncio
 import os
@@ -30,9 +31,11 @@ async def main() -> None:
         session_string = await app.export_session_string()
         me = await app.get_me()
         print("\n" + "=" * 70)
-        print(f"✅ Вход выполнен как @{me.username or me.id}. Скопируй строку ниже в .env:")
+        print(f"✅ Вход выполнен как @{me.username or me.id}. Скопируй строку ниже в Настройки приложения:")
         print("=" * 70)
-        print(f"\nTELEGRAM_SESSION={session_string}\n")
+        print(f"\n{session_string}\n")
+        print("Вставь эту строку в поле «Telegram Session» на странице /settings (без префикса).")
+        print("Один раз — веб и воркер читают её из общей БД, дублировать в Railway не нужно.\n")
 
 
 if __name__ == "__main__":

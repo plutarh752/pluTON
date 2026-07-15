@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { getTelegramCreds } from "./secrets";
 
 // Мост Node → Python-сайдкар Portals (worker/portals_fetch.py) для вкладки «Объёмы».
 // Portals — единственный источник РЕАЛЬНОГО объёма/продаж, но за Cloudflare + истекающим tma-токеном;
@@ -14,9 +15,21 @@ const PYTHON_BIN = process.env.PYTHON_BIN ?? "python3";
 const SIDECAR = path.join(process.cwd(), "worker", "portals_fetch.py");
 
 /** Спавнит python-сайдкар, собирает stdout, парсит JSON. Ненулевой exit → reject со stderr-текстом. */
-export function runPortalsSidecar<T = unknown>(args: string[], timeoutMs = 180_000): Promise<T> {
+export async function runPortalsSidecar<T = unknown>(args: string[], timeoutMs = 180_000): Promise<T> {
+  // Telegram-креды теперь в БД (src/lib/secrets.ts), не в Railway/Vercel env — подмешиваем их в env
+  // дочернего процесса на спавне. Python-сайдкар не меняется: как читал os.environ.get(...), так и читает.
+  const creds = await getTelegramCreds();
+  if (!creds.apiId || !creds.apiHash || !creds.session) {
+    throw new Error("telegram_not_configured: заполни Telegram API ID/Hash/Session в Настройках (/settings)");
+  }
+  const env = {
+    ...process.env,
+    TELEGRAM_API_ID: creds.apiId,
+    TELEGRAM_API_HASH: creds.apiHash,
+    TELEGRAM_SESSION: creds.session,
+  };
   return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON_BIN, [SIDECAR, ...args], { env: process.env });
+    const child = spawn(PYTHON_BIN, [SIDECAR, ...args], { env });
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
@@ -49,9 +62,16 @@ export async function assertPortalsAuth(): Promise<void> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const bar = "═".repeat(72);
+    if (msg.startsWith("telegram_not_configured")) {
+      console.error(
+        `\n${bar}\n⚠ TELEGRAM НЕ НАСТРОЕН — заполни API ID/Hash/Session в /settings.\n` +
+          `   Session сгенерируй локально: npm run portals:login\n${bar}\n`
+      );
+      throw new Error(msg);
+    }
     console.error(
       `\n${bar}\n❌ PORTALS AUTH DEAD — обнови Telegram-сессию.\n` +
-        `   1) npm run portals:login → скопируй TELEGRAM_SESSION в .env (и в Railway-variables на проде)\n` +
+        `   1) npm run portals:login → вставь новую сессию в /settings (Telegram Session)\n` +
         `   2) перезапусти воркер / прогон «Получить объём»\n` +
         `   Причина: ${msg}\n${bar}\n`
     );
