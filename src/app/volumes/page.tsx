@@ -5,7 +5,7 @@ import { getRates } from "@/lib/rates";
 import { freshVolumeRun } from "@/lib/volumeRun";
 import { changesOriginalImageUrl } from "@/lib/changesTg";
 import { isTelegramConfigured } from "@/lib/secrets";
-import { requireGiftSatelliteConfigured } from "@/lib/requireConfigured";
+import { requireGiftSatelliteConfigured, requireOnboarded } from "@/lib/requireConfigured";
 import { GetVolumeButton } from "@/components/GetVolumeButton";
 import { VolumeTable, type VolumeRow } from "@/components/VolumeTable";
 
@@ -24,6 +24,7 @@ export default async function VolumesPage({
   noStore();
   const sp = await searchParams;
   const period = sp?.period && PERIODS.has(sp.period) ? sp.period : "24h";
+  await requireOnboarded(`/volumes?period=${period}`);
   await requireGiftSatelliteConfigured(`/volumes?period=${period}`);
 
   const [lastRun, running, volumeSetting, lastOk, rates, telegramConfigured] = await Promise.all([

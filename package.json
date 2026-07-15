@@ -13,6 +13,8 @@
     "worker:volume": "tsx worker/volume.ts",
     "portals:health": "tsx scripts/portals-health.ts",
     "portals:login": "python3 worker/portals_login.py",
+    "onboarding:reset": "tsx scripts/onboarding-reset.ts",
+    "onboarding:restore": "tsx scripts/onboarding-restore.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",

@@ -11,6 +11,13 @@
 Полный план v2: `/Users/plutarh/.claude/plans/sorted-sleeping-sketch.md`. История v1 (Deal Finder) —
 в git и auto-memory `[[pluton-v2-giftsatellite]]`.
 
+## Подготовка к очистке диалога (перед `/clear`)
+Когда пользователь просит «подготовить диалог к очистке» (или похоже — «сохранись перед clear»), выполнить
+**полное сохранение** в таком порядке: (1) обновить этот `CLAUDE.md` под текущее состояние кода (новые
+инварианты/файлы/команды из проделанной работы), (2) закоммитить ВСЁ незакоммиченное (`git add -A`, осмысленный
+коммит с co-author), (3) запушить в origin текущей ветки. Цель — новый диалог стартует с актуальной
+документацией и чистого рабочего дерева, ничего из сделанного не теряется.
+
 ## Стек
 - **Next.js 15 (App Router, монолит) + React 19** + TypeScript + Tailwind + lucide-react.
 - Шрифты **Geist** (текст/заголовки) + **JetBrains Mono** (лейблы/цифры) через `next/font/google`.
@@ -31,6 +38,8 @@
   `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` тоже вводятся там же (my.telegram.org).
 - `npm run worker:scan [-- --force] [-- <address>]` — legacy tonapi-скан (каталог/on-chain/дельты, вне пути витрины).
 - `npm run db:seed` — сид settings + watchlist (идемпотентно).
+- `npm run onboarding:reset` / `onboarding:restore` — симуляция первого запуска (бэкап+чистка секретов и
+  флага онбординга) и откат (инв. 11). Для проверки мастера `/onboarding`, не для прода.
 - `npm run typecheck` / `npm run build` — проверка перед завершением задач. `npm audit` = 0.
 - Миграции применяются **offline** (`prisma migrate diff --from-schema-datamodel <старая> --to-schema-datamodel
   prisma/schema.prisma --script`) и через **HTTP-драйвер** (по одному DDL-стейтменту), не прямой 5432 — см. инвариант 1.
@@ -207,11 +216,47 @@
       т.к. тащит серверный модуль в client-бандл. Ловили на `LotCard.tsx` при первой сборке после этого
       рефакторинга — если появится новый клиентский импорт из `giftSatellite.ts`, чинить так же.
 
+11. **Флаг «онбординг пройден» — отдельная персистентная запись, НЕ эвристика по ключам.**
+    `Setting{key:"onboarding"}` (`src/lib/onboarding.ts`: `getOnboardingCompleted()`/`setOnboardingCompleted()`)
+    отделён от гейта `GIFT_SATELLITE_KEY` (инв. 10) — можно быть «онбординг пройден» без ключа (Skip) и
+    наоборот. **Бэкфилл встроен прямо в чтение**: если строки флага нет, но `isGiftSatelliteConfigured()`
+    истинно — читаем как пройдено и лениво дописываем строку, без отдельного скрипта миграции (иначе апдейт
+    этой фичи заставил бы уже настроенную установку увидеть Get Started заново). `getOnboardingCompleted`
+    обёрнута в `cache()` из `react` — дедуплицирует чтение флага в рамках одного запроса (корневой
+    `layout.tsx` + page-level `requireOnboarded()` бьют в один DB round-trip, не в два). Гейт
+    `requireOnboarded()` (`requireConfigured.ts`) проверяется ПЕРЕД `requireGiftSatelliteConfigured` на `/`,
+    `/presets`, `/volumes` — редиректит на `/onboarding?next=...`; `/settings` НЕ гейтится (вечная
+    escape-hatch, как и раньше). `/onboarding` сам редиректит на `next`, если флаг уже стоит (гайд не
+    показывается повторно).
+    - **`/onboarding` = полноэкранный пошаговый мастер** (`OnboardingForm.tsx`, клиентская стейт-машина
+      `step`): заставка «PluTON» + «Старт» → 5 шагов-полей (по одному: `giftSatelliteKey` ОБЯЗАТЕЛЬНО без
+      Skip, «Next» disabled пока пусто/не сохранено; затем `tonapiKey`/`telegramApiId`/`telegramApiHash`/
+      `telegramSession` — каждое опц. со Skip/Next) → экран «Готово»/«Финиш». Сохранение НЕ пошагово, а один
+      раз на «Финиш»: `POST /api/settings` (непустые `values`) → проверка `status.giftSatelliteKey` (нет →
+      назад на шаг ключа) → `POST /api/onboarding` (флаг) → `router.push(next)`. Переход между шагами —
+      remount по `key={step}` + CSS-класс `.wizard-step` (keyframe `pl-step-in`, 320ms, в `globals.css` под
+      `prefers-reduced-motion`); заставочный заголовок «PluTON — Get Started» из `page.tsx` УБРАН (переехал в
+      шаг-заставку). `onboarding/page.tsx` — тонкая полноэкранная обёртка (`min-h-[100dvh]`).
+    - **Хром приложения на `/onboarding` скрыт** — `TopNav`/`MobileNav` (`Nav.tsx`) и `Footer.tsx` делают
+      `if (usePathname() === "/onboarding") return null` (`Footer` ради этого стал клиентским). БЕЗ route
+      groups — layout-архитектура (`layout.tsx` с `<html>/<body>`, шрифтами, `template.tsx`, оверлеем)
+      прежняя. Атрибуция @GiftChanges на онбординге не нужна (арта подарков там нет), на остальных страницах
+      сохраняется. `WelcomeBackOverlay` на онбординге и так `null` (`onboarded=false`).
+    - **Экран возврата** — `WelcomeBackOverlay.tsx` (не роут, `fixed`-оверлей в `layout.tsx`, НЕ оборачивает
+      `{children}` структурно), показывается один раз за сессию вкладки браузера (`sessionStorage`), только
+      если флаг стоит; будущий хук для фоновой подгрузки цен — маркер-комментарий внутри его `useEffect`
+      (сейчас не реализован).
+    - **Тест-команды:** `npm run onboarding:reset` бэкапит `secrets`/`onboarding` в
+      `Setting{key:"_onboarding_test_backup"}` и чистит их (симуляция первого запуска — `/` редиректит на
+      `/onboarding`); `npm run onboarding:restore` возвращает из бэкапа. `reset` отказывается работать, если
+      бэкап уже есть (сначала `restore`). Скрипты — `scripts/onboarding-{reset,restore}.ts`.
+
 ## Структура
 - `src/app/` — 3 основных экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
   (Мои пресеты), `/volumes` (Объёмы — таблица рыночной статистики из Portals, инв. 9); плюс `/settings`
   (ввод API-ключей, инв. 10) — не в основной навигации-табах, точка входа — пункт «Ключ» в fluid-меню
-  профиля (`ProfileMenu`) в `TopNav`. Единая
+  профиля (`ProfileMenu`) в `TopNav`; плюс `/onboarding` (Get Started, первый запуск, инв. 11) — не в
+  навигации, редирект-цель гейта `requireOnboarded()`. Единая
   навигация: общий `TopNav`/`MobileNav` из `layout.tsx` на ВСЕХ страницах (бокового `SideNav` больше нет).
   API-роуты: `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
   gift-satellite, кэш), `api/model-previews/` (арт КАЖДОЙ модели из changes.tg + мин.цена из `/search`),
@@ -219,8 +264,8 @@
   union'ом, не заменяет; POST заполняет `previewImageUrl` арт'ом модели) + `api/presets/[id]/` (DELETE),
   `api/prices/` (триггер+статус), `api/volume/` (триггер+статус вкладки «Объёмы», `?period=`,
   409 `telegram_not_configured` без Telegram-кредов), `api/settings/` (GET статус/POST сохранение
-  ключей, инв. 10), `api/scan/` (legacy-триггер). Серверные страницы: `force-dynamic` **+**
-  `unstable_noStore()`.
+  ключей, инв. 10), `api/onboarding/` (POST — выставляет флаг онбординга, инв. 11), `api/scan/`
+  (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
 - **Вкладка «Объёмы» (инв. 9):** компоненты `GetVolumeButton` (кнопка+дропдаун периода, поллинг),
   `VolumeTable` (таблица, per-row бейдж `isPartial`); либы `portals.ts` (мост к Python-сайдкару +
   health-check), `giftstat.ts` (keyless: blockchain_address + telegramId-фолбэк), `marketLinks.ts`,
@@ -232,12 +277,15 @@
   `LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
   `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); настройки: `SettingsForm`
-  (ввод/очистка API-ключей, инв. 10); каркас: `Nav` (`TopNav`/`MobileNav`), `ProfileMenu` (fluid-меню
+  (ввод/очистка API-ключей, инв. 10); первый запуск (инв. 11): `OnboardingForm` (полноэкранный пошаговый
+  мастер: заставка → 5 шагов-полей со Skip/Next → «Готово»/«Финиш»), `WelcomeBackOverlay` (fixed-оверлей
+  возврата, sessionStorage); каркас: `Nav` (`TopNav`/`MobileNav`), `ProfileMenu` (fluid-меню
   профиля в `TopNav`: круглые кнопки без подписей, выезжают вниз, триггер морфится профиль↔крестик;
   пункты — Ключ→`/settings`, Терминал-заглушка, Поддержка→t.me), `Footer` (в т.ч. обязательная
   атрибуция @GiftChanges).
 - `src/lib/` — `db.ts` (Prisma+Neon), `secrets.ts` (шифрование API-ключей в БД, инв. 10),
-  `requireConfigured.ts` (гейт по `GIFT_SATELLITE_KEY`), `giftSatellite.ts` (осн. источник, ключ через
+  `onboarding.ts` (флаг первого запуска + бэкфилл, инв. 11),
+  `requireConfigured.ts` (гейты `requireOnboarded`/`requireGiftSatelliteConfigured`), `giftSatellite.ts` (осн. источник, ключ через
   `secrets.ts`), `markets.ts` (client-safe константы маркетов `Market`/`MARKETS`/`marketLabel` — без
   `process.env`/сети/`node:crypto`; `giftSatellite` их РЕ-ЭКСПОРТИРУЕТ для серверных импортов, но
   клиентские компоненты берут их **напрямую отсюда**, не из `giftSatellite.ts` — см. инв. 10 про

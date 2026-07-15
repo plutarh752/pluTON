@@ -18,6 +18,8 @@ function isActive(pathname: string, href: string): boolean {
 
 export function TopNav() {
   const pathname = usePathname();
+  // Онбординг — полноэкранный мастер без хрома приложения (инв. 11).
+  if (pathname === "/onboarding") return null;
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-outline-variant bg-surface-container-lowest">
       <div className="mx-auto flex h-16 max-w-container items-center justify-between px-margin-mobile md:px-margin-desktop">
@@ -52,6 +54,7 @@ export function TopNav() {
 
 export function MobileNav() {
   const pathname = usePathname();
+  if (pathname === "/onboarding") return null;
   return (
     <nav className="fixed bottom-0 left-0 z-50 flex h-16 w-full items-center justify-around border-t border-outline-variant bg-surface-container-lowest md:hidden">
       {NAV.map((n) => {

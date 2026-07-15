@@ -1,0 +1,255 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, ArrowRight, Check, KeyRound, Rocket, SkipForward } from "lucide-react";
+import type { Field } from "@/lib/secrets";
+
+// Экран первого запуска — пошаговый мастер (один экран = один шаг): заставка → 5 шагов-полей → «Готово».
+// Тот же набор из 5 полей, что и /settings (SettingsForm.tsx), и тот же backend-поток сохранения
+// (POST /api/settings + POST /api/onboarding) — меняется только подача: по одному полю за раз со Skip/Next.
+// Сохранение НЕ на каждом шаге, а один раз на «Финиш».
+
+type FieldStep = {
+  kind: "field";
+  field: Field;
+  label: string;
+  hint: string;
+  required?: boolean;
+  multiline?: boolean;
+};
+type Step = { kind: "splash" } | FieldStep | { kind: "finish" };
+
+const STEPS: Step[] = [
+  { kind: "splash" },
+  {
+    kind: "field",
+    field: "giftSatelliteKey",
+    label: "Gift Satellite API-ключ",
+    required: true,
+    hint: "Основной источник данных всего приложения — без него не работает ни один экран. Создаётся в личном профиле на gift-satellite.dev, вставь как есть.",
+  },
+  {
+    kind: "field",
+    field: "tonapiKey",
+    label: "tonapi.io API-ключ",
+    hint: "Курс TON/USD и legacy-каталог. Бесплатный тир (1 запрос/сек) работает и без ключа — можно донастроить позже в «Настройках».",
+  },
+  {
+    kind: "field",
+    field: "telegramApiId",
+    label: "Telegram API ID",
+    hint: "Нужен только для вкладки «Объёмы» (реальный объём торгов с Portals). my.telegram.org → API development tools.",
+  },
+  {
+    kind: "field",
+    field: "telegramApiHash",
+    label: "Telegram API Hash",
+    hint: "Оттуда же, в паре с API ID (my.telegram.org → API development tools).",
+  },
+  {
+    kind: "field",
+    field: "telegramSession",
+    label: "Telegram Session",
+    multiline: true,
+    hint: "Одноразовая строка сессии. Сгенерируй локально: npm run portals:login (потребуется ввести номер телефона и код из Telegram) → вставь результат сюда.",
+  },
+  { kind: "finish" },
+];
+
+// Индексы шагов-полей (для нумерации «02 / 06») — заставка и «Готово» из счётчика исключены.
+const FIELD_STEP_INDEXES = STEPS.map((s, i) => (s.kind === "field" ? i : -1)).filter((i) => i >= 0);
+
+const inputClass =
+  "w-full rounded border border-outline-variant bg-surface-container px-3 py-2 font-mono text-[12px] text-on-background outline-none focus:border-primary";
+
+export function OnboardingForm({ status, next }: { status: Record<Field, boolean>; next: string }) {
+  const router = useRouter();
+  const [step, setStep] = useState(0);
+  const [values, setValues] = useState<Partial<Record<Field, string>>>({});
+  const [savedStatus] = useState(status);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const current = STEPS[step];
+
+  function setValue(field: Field, v: string) {
+    setValues((s) => ({ ...s, [field]: v }));
+  }
+
+  function goTo(target: number) {
+    setMsg(null);
+    setStep(target);
+  }
+
+  // Skip опц. поля: очищаем значение (не сохраняем) и идём дальше.
+  function skipField(field: Field) {
+    setValues((s) => ({ ...s, [field]: "" }));
+    goTo(step + 1);
+  }
+
+  async function onFinish() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      if (!r.ok) {
+        setMsg("Не удалось сохранить");
+        return;
+      }
+      const d = await r.json();
+      if (!d.status.giftSatelliteKey) {
+        // Обязательный ключ так и не задан — возвращаем на его шаг (защита, в норме недостижимо).
+        setMsg("Нужен обязательный ключ Gift Satellite, чтобы завершить установку");
+        goTo(1);
+        return;
+      }
+      const r2 = await fetch("/api/onboarding", { method: "POST" });
+      if (!r2.ok) {
+        setMsg("Не удалось завершить установку");
+        return;
+      }
+      router.push(next);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Индикатор «02 / 06» для шагов-полей.
+  const fieldPos = current.kind === "field" ? FIELD_STEP_INDEXES.indexOf(step) + 1 : 0;
+  const fieldTotal = FIELD_STEP_INDEXES.length;
+
+  return (
+    <div className="flex min-h-[100dvh] w-full flex-col items-center justify-center px-margin-mobile py-12 md:px-margin-desktop">
+      {/* key={step} → remount → пере-проигрыш анимации входа шага на каждом переходе. */}
+      <div key={step} className="wizard-step w-full max-w-lg">
+        {current.kind === "splash" && (
+          <div className="flex flex-col items-center text-center">
+            <h1 className="font-headline-lg text-headline-lg font-bold tracking-tighter text-primary">PluTON</h1>
+            <p className="mt-4 max-w-md text-on-surface-variant">
+              Персональный мультимаркетный трекер цен коллекционных Telegram-подарков. Настроим ключи для
+              локальной работы — это займёт минуту.
+            </p>
+            <button
+              onClick={() => goTo(1)}
+              className="mt-10 flex items-center justify-center gap-2 rounded-lg bg-primary px-10 py-4 font-label-caps text-label-caps uppercase tracking-widest text-on-primary transition-opacity hover:opacity-90"
+            >
+              <Rocket size={18} /> Старт
+            </button>
+          </div>
+        )}
+
+        {current.kind === "field" && (
+          <div>
+            <div className="mb-6 flex items-center justify-between">
+              <span className="font-mono text-[11px] uppercase tracking-widest text-on-surface-variant">
+                {String(fieldPos).padStart(2, "0")} / {String(fieldTotal).padStart(2, "0")}
+              </span>
+              {current.required ? (
+                <span className="font-mono text-[10px] uppercase tracking-widest text-primary">обязательно</span>
+              ) : (
+                <span className="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
+                  необязательно
+                </span>
+              )}
+            </div>
+
+            <div className="mb-1 flex items-center gap-2">
+              <label className="font-headline-md text-headline-md text-primary">{current.label}</label>
+              {savedStatus[current.field] && (
+                <span className="flex items-center gap-1 font-mono text-[10px] text-emerald-700 dark:text-emerald-400">
+                  <Check size={12} /> настроено
+                </span>
+              )}
+            </div>
+            <p className="mb-4 text-body-md text-on-surface-variant">{current.hint}</p>
+
+            {current.multiline ? (
+              <textarea
+                autoFocus
+                value={values[current.field] ?? ""}
+                onChange={(e) => setValue(current.field, e.target.value)}
+                placeholder={savedStatus[current.field] ? "•••••• сохранено — оставь пустым, чтобы не менять" : ""}
+                rows={3}
+                className={inputClass}
+              />
+            ) : (
+              <input
+                autoFocus
+                type="password"
+                value={values[current.field] ?? ""}
+                onChange={(e) => setValue(current.field, e.target.value)}
+                placeholder={savedStatus[current.field] ? "•••••• сохранено — оставь пустым, чтобы не менять" : ""}
+                className={inputClass}
+              />
+            )}
+
+            <div className="mt-8 flex items-center gap-3">
+              <button
+                onClick={() => goTo(step - 1)}
+                className="flex items-center gap-1 font-mono text-[11px] uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary"
+              >
+                <ArrowLeft size={14} /> Назад
+              </button>
+              <div className="flex-grow" />
+              {!current.required && (
+                <button
+                  onClick={() => skipField(current.field)}
+                  className="flex items-center gap-2 rounded-lg border border-outline-variant px-5 py-3 font-label-caps text-label-caps uppercase tracking-widest text-on-surface-variant transition-opacity hover:opacity-90"
+                >
+                  <SkipForward size={16} /> Skip
+                </button>
+              )}
+              <button
+                onClick={() => goTo(step + 1)}
+                disabled={current.required && !savedStatus[current.field] && !values[current.field]?.trim()}
+                className="flex items-center gap-2 rounded-lg bg-primary px-6 py-3 font-label-caps text-label-caps uppercase tracking-widest text-on-primary transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                Next <ArrowRight size={16} />
+              </button>
+            </div>
+            {current.required && !savedStatus[current.field] && !values[current.field]?.trim() && (
+              <p className="mt-3 font-mono text-[10px] text-on-surface-variant">
+                Заполни ключ, чтобы продолжить — этот шаг пропустить нельзя.
+              </p>
+            )}
+          </div>
+        )}
+
+        {current.kind === "finish" && (
+          <div className="flex flex-col items-center text-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-on-primary">
+              <Check size={28} />
+            </span>
+            <h2 className="mt-6 font-headline-md text-headline-md text-primary">Всё готово</h2>
+            <p className="mt-2 max-w-md text-on-surface-variant">
+              Ключи будут сохранены зашифрованными в базе. Незаполненное можно донастроить позже в
+              «Настройках». Нажми «Финиш», чтобы перейти в приложение.
+            </p>
+            <div className="mt-10 flex items-center gap-3">
+              <button
+                onClick={() => goTo(step - 1)}
+                className="flex items-center gap-1 font-mono text-[11px] uppercase tracking-widest text-on-surface-variant transition-colors hover:text-primary"
+              >
+                <ArrowLeft size={14} /> Назад
+              </button>
+              <button
+                onClick={onFinish}
+                disabled={busy}
+                className="flex items-center justify-center gap-2 rounded-lg bg-primary px-10 py-4 font-label-caps text-label-caps uppercase tracking-widest text-on-primary transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                <KeyRound size={18} /> {busy ? "Сохраняю…" : "Финиш"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {msg && <p className="mt-6 text-center font-mono text-[11px] text-on-surface-variant">{msg}</p>}
+      </div>
+    </div>
+  );
+}

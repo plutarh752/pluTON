@@ -1,5 +1,13 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
 // Футер PluTON v2 (из Stitch-экспорта): копирайт + служебные ссылки + индикатор статуса.
+// Клиентский только ради guard'а: на онбординге (полноэкранный мастер) хром скрыт (инв. 11) — арта
+// подарков там нет, обязательная атрибуция @GiftChanges на остальных страницах сохраняется.
 export function Footer() {
+  const pathname = usePathname();
+  if (pathname === "/onboarding") return null;
   return (
     <footer className="border-t border-outline-variant bg-surface-container-lowest">
       <div className="mx-auto flex max-w-container flex-col items-center justify-between gap-4 px-margin-mobile py-8 md:flex-row md:px-margin-desktop">
