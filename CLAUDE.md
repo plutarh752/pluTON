@@ -213,7 +213,8 @@
 ## Структура
 - `src/app/` — 3 основных экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
   (Мои пресеты), `/volumes` (Объёмы — таблица рыночной статистики из Portals, инв. 9); плюс `/settings`
-  (ввод API-ключей, инв. 10) — не в основной навигации-табах, точка входа — иконка-ключ в `TopNav`. Единая
+  (ввод API-ключей, инв. 10) — не в основной навигации-табах, точка входа — пункт «Ключ» в fluid-меню
+  профиля (`ProfileMenu`) в `TopNav`. Единая
   навигация: общий `TopNav`/`MobileNav` из `layout.tsx` на ВСЕХ страницах (бокового `SideNav` больше нет).
   API-роуты: `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
   gift-satellite, кэш), `api/model-previews/` (арт КАЖДОЙ модели из changes.tg + мин.цена из `/search`),
@@ -234,7 +235,10 @@
   `LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
   `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); настройки: `SettingsForm`
-  (ввод/очистка API-ключей, инв. 10); каркас: `Nav`, `Footer` (в т.ч. обязательная атрибуция @GiftChanges).
+  (ввод/очистка API-ключей, инв. 10); каркас: `Nav` (`TopNav`/`MobileNav`), `ProfileMenu` (fluid-меню
+  профиля в `TopNav`: круглые кнопки без подписей, выезжают вниз, триггер морфится профиль↔крестик;
+  пункты — Ключ→`/settings`, Терминал-заглушка, Поддержка→t.me), `Footer` (в т.ч. обязательная
+  атрибуция @GiftChanges).
 - `src/lib/` — `db.ts` (Prisma+Neon), `secrets.ts` (шифрование API-ключей в БД, инв. 10),
   `requireConfigured.ts` (гейт по `GIFT_SATELLITE_KEY`), `giftSatellite.ts` (осн. источник, ключ через
   `secrets.ts`), `markets.ts` (client-safe константы маркетов `Market`/`MARKETS`/`marketLabel` — без
