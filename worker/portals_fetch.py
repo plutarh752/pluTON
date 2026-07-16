@@ -35,6 +35,52 @@ THROTTLE = float(os.environ.get("PORTALS_THROTTLE_SEC", "0.35"))     # пауз�
 RUN_BUDGET = float(os.environ.get("PORTALS_RUN_BUDGET_SEC", "540"))  # общий бюджет прогона (сек)
 PERIOD_DAYS = {"24h": 1, "7d": 7, "30d": 30}
 
+# Хост Portals. Площадка мигрировала portals-market.com → portal-market.com (2026-07-16): у СТАРОГО
+# хоста сняли DNS-запись (curl: (6) Could not resolve host). portalsmp 1.2 (последняя на PyPI) всё ещё
+# хардкодит старый хост в API_URL/Origin/Referer — апгрейд пакета не спасает, поэтому переопределяем
+# модульные глобалы (_patch_host). База настраивается через PORTALS_API_BASE на случай новой миграции;
+# авторитетный источник актуального хоста — web_view.url мини-аппа бота @portals в Telegram.
+PORTALS_API_BASE = os.environ.get("PORTALS_API_BASE", "https://portal-market.com").rstrip("/")
+
+# Классификация ошибок Portals: сеть (DNS/таймаут/Cloudflare) vs авторизация (протухший tma). Health-check
+# раньше ЛЮБОЙ провал выдавал за «протухшую сессию» и гонял пользователя перелогиниваться впустую — теперь
+# Node-баннеры (src/lib/portals.ts) и UI (/volumes) показывают РАЗНОЕ по префиксу PORTALS_*_ERROR.
+_NET_MARKERS = (
+    "could not resolve host", "curl: (6)", "curl: (7)", "curl: (28)", "curl: (35)",
+    "failed to connect", "connection refused", "connection reset", "connection aborted",
+    "connection error", "connecterror", "timed out", "timeout", "read timed out",
+    "temporary failure in name resolution", "name or service not known",
+    "network is unreachable", "no route to host", "max retries", "ssl", "handshake",
+)
+_AUTH_MARKERS = (
+    "401", "403", "unauthorized", "forbidden", "auth_key_unregistered", "authkeyunregistered",
+    "session_revoked", "session_expired", "user_deactivated", "session_password_needed",
+    "invalid tma", "invalid auth", "expired",
+)
+
+
+def _classify(exc) -> str:
+    """Одно из "network" | "auth" | "unknown" по тексту исключения (сеть проверяем первой)."""
+    s = str(exc).lower()
+    if any(m in s for m in _NET_MARKERS):
+        return "network"
+    if any(m in s for m in _AUTH_MARKERS):
+        return "auth"
+    return "unknown"
+
+
+def _patch_host(pm) -> None:
+    """Переставить portalsmp на живой хост Portals (см. PORTALS_API_BASE). Функции либы читают API_URL/
+    HEADERS как модульные глобалы на каждом вызове, поэтому патч глобалов действует на все запросы."""
+    api = getattr(pm, "portalsapi", None)
+    if api is None:
+        import portalsmp.portalsapi as api  # noqa: PLC0415
+    api.API_URL = PORTALS_API_BASE + "/api/"
+    headers = getattr(api, "HEADERS", None)
+    if isinstance(headers, dict):
+        headers["Origin"] = PORTALS_API_BASE
+        headers["Referer"] = PORTALS_API_BASE + "/"
+
 # кандидаты ключей (точная схема Portals из этой среды не проб'илась — парсим защитно; см. риски в плане)
 TS_KEYS = ("created_at", "updated_at", "listed_at", "date", "timestamp", "time")
 PRICE_KEYS = ("price", "amount", "price_ton", "ton_price", "total_price")
@@ -48,6 +94,16 @@ VOLUME_KEYS = ("volume", "daily_volume", "dailyVolume", "volume_24h", "volume24h
 def die(msg) -> None:
     sys.stderr.write(str(msg).strip() + "\n")
     sys.exit(1)
+
+
+def emit_progress(done, total, label) -> None:
+    """Строка прогресса в stderr с префиксом `@P ` (Node-мост её парсит и обновляет UI-прогресс-бар).
+    Отдельно от stdout, где лежит финальный JSON-результат. Best-effort — сбой печати не важен."""
+    try:
+        sys.stderr.write("@P " + json.dumps({"done": done, "total": total, "label": label}) + "\n")
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ─────────────────────────── auth ───────────────────────────
@@ -83,7 +139,7 @@ def get_auth() -> str:
     except SystemExit:
         raise
     except Exception as e:  # noqa: BLE001
-        die(f"mint tma failed: {e}")
+        die(f"PORTALS_{_classify(e).upper()}_ERROR: mint tma failed: {e}")
 
 
 # ─────────────────────────── защитные экстракторы ───────────────────────────
@@ -196,7 +252,7 @@ def cmd_health(pm) -> None:
     try:
         pm.collections(limit=1, authData=auth)
     except Exception as e:  # noqa: BLE001
-        die(f"authed probe failed: {e}")
+        die(f"PORTALS_{_classify(e).upper()}_ERROR: authed probe failed: {e}")
     print(json.dumps({"ok": True}))
 
 
@@ -226,7 +282,10 @@ def cmd_run(pm, period, limit) -> None:
 
     started = time.monotonic()
     out, sample = [], None
-    for c in cols:
+    total = len(cols)
+    emit_progress(0, total, "")
+    for i, c in enumerate(cols):
+        emit_progress(i, total, c["name"])  # что тянем прямо сейчас → живой лог в UI
         if time.monotonic() - started > RUN_BUDGET:
             c.update({"sales": [], "capped": False, "budgetSkipped": True})
             out.append(c)
@@ -239,6 +298,7 @@ def cmd_run(pm, period, limit) -> None:
             sample = s
         c.update({"sales": sales, "capped": capped, "budgetSkipped": False})
         out.append(c)
+    emit_progress(total, total, "")
 
     print(json.dumps({"collections": out, "sample": sample}))
 
@@ -256,6 +316,7 @@ def main() -> None:
         import portalsmp as pm
     except Exception as e:  # noqa: BLE001
         die(f"portalsmp import failed ({e}); pip install -r requirements.txt")
+    _patch_host(pm)  # переставить либу на живой хост Portals (миграция домена, см. PORTALS_API_BASE)
 
     if args.health:
         cmd_health(pm)

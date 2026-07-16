@@ -68,7 +68,12 @@ export default async function VolumesPage({
     blockchainAddress: cv.blockchainAddress,
   }));
 
-  const authDead = lastRun?.status === "failed" && lastRun?.authOk === false;
+  // Различаем сетевой сбой Portals (DNS/таймаут/Cloudflare) от истёкшей Telegram-сессии — по коду-причине
+  // в lastRun.error (см. src/lib/portals.ts + worker/portals_fetch.py). При сетевом сбое перелогиниваться
+  // НЕ нужно, поэтому «протухла сессия» не показываем.
+  const failed = lastRun?.status === "failed";
+  const netDown = failed && /portals_network_down|PORTALS_NETWORK_ERROR/i.test(lastRun?.error ?? "");
+  const authDead = failed && !netDown && lastRun?.authOk === false;
 
   return (
     <main className="flex min-h-[calc(100vh-64px)] flex-col">
@@ -90,6 +95,13 @@ export default async function VolumesPage({
             <Link href={`/settings?next=${encodeURIComponent(`/volumes?period=${period}`)}`} className="underline">
               Настроить →
             </Link>
+          </p>
+        )}
+        {telegramConfigured && netDown && (
+          <p className="mt-4 max-w-xl rounded border border-outline-variant px-4 py-2 font-mono text-[11px] text-on-surface-variant">
+            🌐 Portals временно недоступен по сети (DNS/таймаут/Cloudflare) — Telegram-сессия здесь ни при
+            чём, заново входить не нужно. Повтори позже. Если Portals сменил домен, задай{" "}
+            <code>PORTALS_API_BASE</code> и повтори прогон.
           </p>
         )}
         {telegramConfigured && authDead && (

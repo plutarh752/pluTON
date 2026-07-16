@@ -17,6 +17,8 @@ import {
   type GsCollectionOffers,
 } from "../src/lib/giftSatellite";
 import { tonToStars, tonToUsd, type Rates } from "../src/lib/format";
+import { marketLabel } from "../src/lib/markets";
+import { createProgress, clearRunProgress } from "../src/lib/progress";
 
 async function loadSettings() {
   const rows = await prisma.setting.findMany();
@@ -68,8 +70,11 @@ async function main() {
     });
   }
   console.log(`▶ price run #${run.id} | пресетов: ${presets.length}`);
+  const progress = createProgress("prices", run.id);
+  await progress.update({ phase: "Курс TON→USD…", total: 0, done: 0, label: "" }, true);
 
   if (presets.length === 0) {
+    await clearRunProgress("prices");
     await prisma.priceRun.update({
       where: { id: run.id },
       data: { status: "success", finishedAt: new Date(), lotsCount: 0, marketStatus: {}, durationMs: Date.now() - run.startedAt.getTime() },
@@ -96,6 +101,7 @@ async function main() {
   const gs = new GiftSatellite();
 
   // floor по коллекциям (одним запросом; при ошибке — floor неизвестен, чипы просто не рисуем).
+  await progress.update({ phase: "Floor коллекций…" }, true);
   let offersByCollection = new Map<string, GsCollectionOffers>();
   try {
     const offers = await gs.getCollectionOffers();
@@ -117,14 +123,24 @@ async function main() {
     for (const market of MARKETS)
       for (const backdrop of preset.backdropNames) tasks.push({ preset, market, backdrop });
 
+  // Прогресс: total = число задач; done растёт по мере оседания каждого запроса (маркеты параллельно,
+  // лимитер разносит их во времени). Пишем throttled'ом, не блокируя сам сбор (fire-and-forget).
+  let done = 0;
+  await progress.update({ phase: "Опрос маркетов…", total: tasks.length, done: 0, label: "" }, true);
   const settled = await Promise.allSettled(
     tasks.map((t) =>
-      gs.searchMarket(t.market, t.preset.collectionName, {
-        models: [t.preset.modelName],
-        backdrops: [t.backdrop],
-      })
+      gs
+        .searchMarket(t.market, t.preset.collectionName, {
+          models: [t.preset.modelName],
+          backdrops: [t.backdrop],
+        })
+        .finally(() => {
+          done++;
+          void progress.update({ done, label: `${t.preset.collectionName} · ${marketLabel(t.market)} · ${t.backdrop}` });
+        })
     )
   );
+  await progress.update({ phase: "Сохранение снапшота…", done: tasks.length, label: "" }, true);
 
   // marketStatus[presetId][market] = "ok" | "failed" — degraded теперь per-столбец (модель), а не по
   // коллекции целиком. ok, если хоть один фон пары (пресет, маркет) успешен.
@@ -191,6 +207,7 @@ async function main() {
   // чистим снапшоты прошлых прогонов (витрина читает только текущий run).
   await prisma.marketListing.deleteMany({ where: { runId: { not: run.id } } });
 
+  await clearRunProgress("prices");
   console.log(`■ price run #${run.id} done: status=${status} lots=${rows.length} ok-pairs=${okCount}/${pairs.length}`);
   await prisma.$disconnect();
 }

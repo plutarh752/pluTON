@@ -17,6 +17,7 @@ import { collectionIdMap } from "../src/lib/giftPreviews";
 import { giftstatMetaMap, type CollectionMeta } from "../src/lib/giftstat";
 import { assertPortalsAuth, fetchPortalsRun, type PortalsSale } from "../src/lib/portals";
 import { tonToUsd, type Rates } from "../src/lib/format";
+import { createProgress, clearRunProgress } from "../src/lib/progress";
 
 const PERIODS = new Set(["24h", "7d", "30d"]);
 
@@ -98,11 +99,14 @@ async function main() {
     run = await prisma.volumeRun.create({ data: { status: "running", trigger: "worker", period } });
   }
   console.log(`▶ volume run #${run.id} | период: ${period}`);
+  const progress = createProgress("volume", run.id);
+  await progress.update({ phase: "Проверка авторизации Portals…", total: 0, done: 0, label: "" }, true);
 
   // 1) HEALTH-CHECK Portals-авторизации — ДО любой работы. Провал → громкий баннер + failed-прогон.
   try {
     await assertPortalsAuth();
   } catch (e) {
+    await clearRunProgress("volume");
     await prisma.volumeRun.update({
       where: { id: run.id },
       data: {
@@ -119,6 +123,7 @@ async function main() {
   await prisma.volumeRun.update({ where: { id: run.id }, data: { authOk: true } });
 
   // 2) курс TON→USD (для $), как в worker/prices.ts.
+  await progress.update({ phase: "Курс TON→USD…" }, true);
   let tonUsd = settings.rates?.ton_usd ?? 1.78;
   try {
     tonUsd = await new TonApi().getTonUsd();
@@ -134,18 +139,30 @@ async function main() {
 
   // 3) картинки/адреса коллекций: telegramId из кэша gift-satellite (как на витрине) + Giftstat как
   //    фолбэк telegramId и источник blockchain_address (ссылка на Getgems). Оба best-effort.
+  await progress.update({ phase: "Каталог коллекций…" }, true);
   const gs = new GiftSatellite();
   const idMap = await collectionIdMap(gs).catch(() => ({}) as Record<string, string>);
   const meta = await giftstatMetaMap().catch(() => ({}) as Record<string, CollectionMeta>);
 
   // 4) Portals: минт tma один раз, обход всех коллекций за окно периода (per-collection пагинация feed).
+  //    Сайдкар шлёт per-collection прогресс (stderr `@P`) → живой прогресс-бар + лог в UI. Первый минт tma
+  //    может занять несколько секунд — до первого `@P` держим фазу «Подключение к Portals…».
+  await progress.update({ phase: "Подключение к Portals (минт tma)…" }, true);
   const limit = settings.volume?.collections_limit ?? 500;
-  const portals = await fetchPortalsRun(period, limit);
+  const portals = await fetchPortalsRun(period, limit, (p) => {
+    void progress.update({
+      phase: "Сбор объёма по коллекциям",
+      total: p.total,
+      done: p.done,
+      label: p.label || "…",
+    });
+  });
   if (portals.sample != null) {
     console.log(`  · schema sample (первый action Portals): ${JSON.stringify(portals.sample).slice(0, 400)}`);
   }
 
   // 5) агрегация по коллекции.
+  await progress.update({ phase: "Агрегация и сохранение…", label: "" }, true);
   const rows: Prisma.CollectionVolumeCreateManyInput[] = [];
   let partialCount = 0;
   for (const c of portals.collections) {
@@ -189,6 +206,7 @@ async function main() {
 
   // 7) чистим прошлые прогоны ЭТОГО периода (оставляем последний на каждый период) — cascade убирает их строки.
   await prisma.volumeRun.deleteMany({ where: { period, id: { not: run.id } } });
+  await clearRunProgress("volume");
 
   console.log(
     `■ volume run #${run.id} done: status=${status} collections=${rows.length} partial=${partialCount}`

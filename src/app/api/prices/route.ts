@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { triggerWorker } from "@/lib/trigger";
 import { freshRunningRun } from "@/lib/priceRun";
+import { getRunProgress } from "@/lib/progress";
 
 // Кнопка «Получить цены»: триггер прогона + статус для поллинга (аналог /api/scan).
 export const dynamic = "force-dynamic";
@@ -18,12 +19,19 @@ async function cooldownLeftSeconds(): Promise<number> {
 export async function GET() {
   const running = await freshRunningRun();
   const last = await prisma.priceRun.findFirst({ orderBy: { startedAt: "desc" } });
+  // Прогресс отдаём только для ТЕКУЩЕГО живого прогона (гейт по runId) — чтобы не показать хвост прошлого.
+  let progress = null;
+  if (running) {
+    const p = await getRunProgress("prices");
+    if (p && p.runId === running.id) progress = p;
+  }
   return NextResponse.json({
     running: !!running,
     runningRunId: running?.id ?? null,
     lastRunId: last?.id ?? null,
     lastStatus: last?.status ?? null,
     marketStatus: last?.marketStatus ?? null,
+    progress,
     cooldownLeft: await cooldownLeftSeconds(),
   });
 }

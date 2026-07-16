@@ -116,6 +116,19 @@
    быстрых POST спавнили два прогона (TOCTOU). Осиротевшую `running`-строку (воркер упал) роут считает
    мёртвой через `STALE_RUNNING_MS` (10 мин), чтобы кнопка не залипала. Legacy-скан — тем же путём
    (`job=scan`, `/api/scan`).
+   - **Живой прогресс прогона (прогресс-бар + консоль-лог).** Прогоны «Получить цены»/«Получить объём»
+     тяжёлые (десятки секунд–минуты) → без обратной связи кажутся зависшими. Прогресс хранится в строке
+     `Setting{key:"progress:prices"|"progress:volume"}` (`src/lib/progress.ts`) — **НЕ в новой колонке**
+     (чтобы не гонять offline-миграцию, инв. 1). Воркер пишет `{runId,done,total,label,phase}` throttled'ом
+     (`createProgress`, деф. 500мс; смена фазы/итог — сразу, покадровые инкременты — по таймеру), в конце
+     `clearRunProgress`. GET-статус (`/api/{prices,volume}`) отдаёт `progress` **только для текущего живого
+     прогона** (гейт `progress.runId === running.id` — не показать хвост прошлого). Клиент — общий хук
+     `useRunPoller` (`src/components/useRunPoller.ts`): поллит статус (1.2с), копит консоль-лог из `label`
+     (последние 7 строк), **`router.refresh()` только ПРИ ЗАВЕРШЕНИИ** (не на каждый тик — данные витрины/
+     таблицы появляются лишь в конце; это же позволило ускорить поллинг). Рендер — `RunProgress.tsx`
+     (бар + проценты + затухающий mask'ом лог, курсор-мигалка; `total=0` → индетерминантный бар). Прогресс —
+     **вспомогательный: сбой его записи НИКОГДА не роняет прогон** (best-effort try/catch в `progress.ts`).
+     Для объёма per-collection прогресс **стримит Python-сайдкар** (см. инв. 9, протокол `@P`).
 
 5. **Прогон цен → снапшот в БД, витрина читает последний прогон.** `worker/prices.ts`: для каждого
    **пресета × 5 маркетов × каждого фона** (отдельный `/search` на фон — секция гарантированно показывает
@@ -159,7 +172,7 @@
    Эмпирически (probe): ни gift-satellite, ни keyless-Giftstat (`api.giftstat.app`) НЕ отдают объём торгов,
    вторичные продажи, время последней сделки и счётчик продаж по моделям (`/volume`,`/sales`,`/activity` →
    404; `last_sale_date` Giftstat = дата ПЕРВИЧНОГО минта; `model_count` = тираж, не продажи). Реальный
-   объём есть только у Portals (`portals-market.com/api`), за Cloudflare + истекающим Telegram-`tma`.
+   объём есть только у Portals (`portal-market.com/api`), за Cloudflare + истекающим Telegram-`tma`.
    - **Изоляция грязи в Python-сайдкаре** `worker/portals_fetch.py` (portalsmp: curl_cffi обход Cloudflare +
      Pyrogram минт tma из headless session-строки `TELEGRAM_SESSION`). Node-воркер `worker/volume.ts` его
      **спавнит** (как tsx-джобы) и читает JSON; вся работа с БД — в Node. Сайдкар минтит tma ОДИН раз на
@@ -167,24 +180,32 @@
      100+ Telegram-коннектов). `src/lib/portals.ts` — мост Node→сайдкар + защитный парсинг (схема Portals
      из dev-среды не проб'илась → поля коллекций/продаж парсим по кандидатам ключей, как giftSatellite;
      первый реальный прогон логирует `sample` — при расхождении поправить кандидаты).
-   - **Health-check обязателен и громкий** (`assertPortalsAuth` в `src/lib/portals.ts`): при протухшем tma
-     печатает жирный баннер в терминал и роняет прогон ДО обхода коллекций. Зовётся: первый шаг
-     `worker/volume.ts`, `npm run portals:health`.
-   - **⚠ ТЕКУЩАЯ ПОЛОМКА (2026-07-16, разбирается в новом диалоге): «Получить объём» падает не из-за
-     Telegram-сессии, а из-за DNS.** `npm run portals:health` → `Причина: authed probe failed: … curl: (6)
-     Could not resolve host: portals-market.com`. Проверено: **у хоста `portals-market.com` (его зовёт
-     `portalsmp`, база API из инв. 9) сейчас НЕТ A/AAAA-записи** — подтверждено авторитетно на его же
-     Cloudflare-NS (`dig @joyce.ns.cloudflare.com portals-market.com A` → пусто), и через 1.1.1.1/8.8.8.8.
-     Домен зарегистрирован (NS/SOA есть), но апекс и `www`/`api` без A. Общий интернет и минт tma (Telegram)
-     РАБОТАЮТ — падение чисто сетевое, к авторизации отношения не имеет. `portals.market`/`portalsmarket.com`
-     — чужие/припаркованные (Sedo `91.195.240.*`), НЕ подставлять вслепую. **Что нужно:** выяснить актуальный
-     хост/домен Portals (возможно, у них временный DNS-даун ИЛИ переезд) и обновить базу в `portalsmp`/
-     `src/lib/portals.ts`/`worker/portals_fetch.py`; ретест `npm run portals:health` до «✅ Portals auth OK».
-   - **ДЕФЕКТ рядом: health-check выдаёт ЛЮБОЙ провал Portals (в т.ч. DNS/сеть/Cloudflare) за «PORTALS AUTH
-     DEAD».** Из-за этого баннер `authDead` в `/volumes` и терминал-баннер шлют чинить Telegram-сессию, хотя
-     сессия жива. TODO (в новом диалоге): в `assertPortalsAuth`/сайдкаре различать сетевую ошибку
-     (DNS/timeout/curl (6)/(7)) от auth-ошибки (протухший tma) и показывать РАЗНЫЕ баннеры. Пока баннеры
-     обновлены только по формулировке (консоль → кнопка «Получить», инв. 12), различение не сделано.
+   - **Живой прогресс `--run` — протокол `@P` по stderr.** Сайдкар печатает `stdout` = финальный JSON
+     результата, но per-collection прогресс шлёт **строками stderr с префиксом `@P {json}`** (`emit_progress`
+     в `portals_fetch.py`, по одной на коллекцию). `runPortalsSidecar` построчно парсит stderr: `@P`-строки
+     → `onProgress` (буферизует незавершённую строку между чанками), остальной stderr копит для текста ошибки.
+     `fetchPortalsRun(period,limit,onProgress)` пробрасывает колбэк в `worker/volume.ts` → прогресс-бар «Сбор
+     объёма по коллекциям» (инв. 4). **Не смешивать `@P` со stdout** — иначе `JSON.parse(out)` результата сломается.
+   - **⚠ ХОСТ Portals: `portal-market.com` (СИНГУЛЯРНЫЙ «portal»), НЕ `portals-market.com`.** Площадка
+     мигрировала домен **2026-07-16**: у старого `portals-market.com` сняли DNS-запись (curl: (6) Could not
+     resolve host), из-за чего «Получить объём» падал — **это была НЕ Telegram-сессия, а DNS**. `portalsmp`
+     1.2 (последняя на PyPI) всё ещё хардкодит СТАРЫЙ хост в `API_URL`/`Origin`/`Referer` — апгрейд пакета не
+     спасает. **Фикс — монкипатч** `_patch_host()` в `worker/portals_fetch.py` (переставляет модульные глобалы
+     `portalsmp.portalsapi` на живой хост; функции либы читают их на каждом вызове, так что патч действует на
+     все запросы). База настраивается env-переменной **`PORTALS_API_BASE`** (деф. `https://portal-market.com`)
+     на случай новой миграции. **Авторитетный источник актуального хоста — `web_view.url` мини-аппа бота
+     `@portals` в Telegram** (Telegram хранит зарегистрированный URL мини-аппа; минт WebView → в URL live-домен;
+     `portals.market`/`portalsmarket.com` — чужие припаркованные Sedo `91.195.240.*`, НЕ подставлять).
+   - **Health-check обязателен и громкий** (`assertPortalsAuth` в `src/lib/portals.ts`): роняет прогон ДО
+     обхода коллекций и печатает жирный баннер. Зовётся: первый шаг `worker/volume.ts`, `npm run portals:health`.
+     **Различает причину провала** (было: любой сбой = «PORTALS AUTH DEAD», гнало перелогиниваться впустую):
+     сайдкар классифицирует исключение (`_classify` в `portals_fetch.py`) и помечает `die`-сообщение префиксом
+     `PORTALS_NETWORK_ERROR` (DNS/таймаут/curl (6)/(7)/Cloudflare) / `PORTALS_AUTH_ERROR` (протухший tma:
+     401/403/`AUTH_KEY_UNREGISTERED`/…) / `PORTALS_UNKNOWN_ERROR`. `assertPortalsAuth` по префиксу показывает
+     РАЗНЫЕ терминал-баннеры и бросает разные коды: `portals_network_down:` (сеть — сессия ни при чём) /
+     `portals_auth_dead:` (чинить сессию) / `portals_error:` (общий). UI `/volumes` по `lastRun.error`
+     (`netDown` = `/portals_network_down|PORTALS_NETWORK_ERROR/`) показывает нейтральный «Portals недоступен по
+     сети» ОТДЕЛЬНО от amber «сессия протухла» (`authDead = failed && !netDown && authOk===false`).
    - **Контур — как «Получить цены»** (инв. 4/5): кнопка «Получить объём» + дропдаун периода (24h/7d/30d,
      выбор ДО запуска) → `POST /api/volume?period=` создаёт `VolumeRun{running,period}` СИНХРОННО (TOCTOU) →
      `triggerWorker("volume", runId, period)` → снапшот в `CollectionVolume` → read-only `/volumes` читает
@@ -332,15 +353,18 @@
   ключей, инв. 10) + `api/settings/telegram-login/` (POST `action`-мастер Telegram-входа, инв. 12),
   `api/onboarding/` (POST — выставляет флаг онбординга, инв. 11), `api/scan/`
   (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
-- **Вкладка «Объёмы» (инв. 9):** компоненты `GetVolumeButton` (кнопка+дропдаун периода, поллинг),
+- **Вкладка «Объёмы» (инв. 9):** компоненты `GetVolumeButton` (кнопка+дропдаун периода, живой прогресс-бар/
+  лог через `useRunPoller`+`RunProgress`, инв. 4),
   `VolumeTable` (таблица, per-row бейдж `isPartial`); либы `portals.ts` (мост к Python-сайдкару +
   health-check), `portalsLogin.ts` (реестр живого процесса UI-входа, инв. 12), `giftstat.ts` (keyless:
   blockchain_address + telegramId-фолбэк), `marketLinks.ts`, `volumeRun.ts` (running-guard). Воркер
   `worker/volume.ts` + Python `worker/portals_fetch.py` (осн. сбор) / `worker/portals_login_interactive.py`
   (UI-мастер входа, инв. 12) / `worker/portals_login.py` (консольный фолбэк). Миграция таблиц —
   `scripts/migrate-volumes.ts`.
-- `src/components/` — витрина: `GetPricesButton` (триггер+поллинг, устойчив к смене вкладки через
-  `visibilitychange`), `Showcase` (клиентская обёртка сетки: глобальная панель «Фильтр» — сортировка по цене
+- `src/components/` — витрина: `GetPricesButton` (триггер + живой прогресс-бар/лог через общий
+  `useRunPoller`, устойчив к смене вкладки; инв. 4), `RunProgress` (презентационный бар+проценты+консоль-лог),
+  `useRunPoller` (хук поллинга статуса+прогресса, refresh при завершении, cooldown),
+  `Showcase` (клиентская обёртка сетки: глобальная панель «Фильтр» — сортировка по цене
   + выбор площадок, localStorage; см. инв. 5), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/
   `LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
@@ -369,6 +393,7 @@
   `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка по цветовой семье→тёмный→светлый),
   `format.ts` (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан, ключ через `secrets.ts`),
   `scoring.ts` (только статистика/редкость), `trigger.ts` (локальный spawn воркер-джобы),
+  `progress.ts` (живой прогресс прогонов в строке `Setting`, throttled `createProgress`; инв. 4),
   `portalsLogin.ts` (server-only реестр живого процесса Telegram-входа для UI-мастера, инв. 12),
   `address.ts`, `usePrefersReducedMotion.ts` (клиентский хук — JS-гейт reduced-motion для анимаций инв. 11).
 - `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`,
@@ -390,5 +415,6 @@
   кнопкой «Получить» прямо в `/settings` (мастер телефон→код→2FA, инв. 12); `npm run portals:login` —
   консольный фолбэк. tma истекает → health-check в начале каждого прогона объёма кричит в лог. Нужен
   установленный Python 3 (`pip install -r requirements.txt`) — в т.ч. для UI-мастера входа.
-  Опц. тюнинг (env): `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`, `PORTALS_THROTTLE_SEC`,
-  `PYTHON_BIN`.
+  Опц. тюнинг (env): `PORTALS_API_BASE` (деф. `https://portal-market.com` — живой хост Portals, менять при
+  миграции домена, см. инв. 9), `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`,
+  `PORTALS_THROTTLE_SEC`, `PYTHON_BIN`.

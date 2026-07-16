@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { triggerWorker } from "@/lib/trigger";
 import { freshVolumeRun } from "@/lib/volumeRun";
 import { isTelegramConfigured } from "@/lib/secrets";
+import { getRunProgress } from "@/lib/progress";
 
 // Кнопка «Получить объём» (вкладка «Объёмы»): триггер прогона Portals + статус для поллинга.
 // Аналог /api/prices, но с окном периода (24h|7d|30d), выбираемым ДО запуска.
@@ -30,6 +31,13 @@ export async function GET(req: NextRequest) {
   const period = parsePeriod(req);
   const running = await freshVolumeRun();
   const last = await prisma.volumeRun.findFirst({ where: { period }, orderBy: { startedAt: "desc" } });
+  // Прогресс — только для текущего живого прогона (гейт по runId). Прогон объёма глобальный (один за раз),
+  // поэтому период прогресса может отличаться от запрошенного ?period — это ок, показываем его как есть.
+  let progress = null;
+  if (running) {
+    const p = await getRunProgress("volume");
+    if (p && p.runId === running.id) progress = p;
+  }
   return NextResponse.json({
     period,
     running: !!running,
@@ -38,6 +46,7 @@ export async function GET(req: NextRequest) {
     lastRunId: last?.id ?? null,
     lastStatus: last?.status ?? null,
     authOk: last?.authOk ?? null,
+    progress,
     cooldownLeft: await cooldownLeftSeconds(period),
   });
 }
