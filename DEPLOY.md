@@ -60,18 +60,23 @@ portalsmp + Pyrogram + curl_cffi), которого Node-воркер (`worker/v
 pip install -r requirements.txt
 ```
 
-Одноразовый вход в Telegram (личный ввод номера телефона + кода):
+Вход в Telegram (получить session-строку). **Основной путь — прямо в приложении, консоль не нужна:**
+на `/settings` введи `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (my.telegram.org), затем нажми кнопку
+**«Получить»** рядом с полем «Telegram Session» → мастер спросит номер телефона → код из Telegram
+(и облачный пароль, если включён 2FA). Сессия сохранится в БД автоматически. Для мастера нужен
+установленный локально Python 3 (`pip install -r requirements.txt`).
+
+Консольный фолбэк (то же, но из терминала):
 
 ```bash
 npm run portals:login   # спросит TELEGRAM_API_ID/HASH (my.telegram.org) + номер + код (и 2FA, если есть)
-                         # → печатает session-строку — вставь в /settings (поле «Telegram Session»,
-                         #   вместе с API ID/Hash)
+                         # → печатает session-строку — вставь в /settings (поле «Telegram Session»)
 npm run portals:health  # проверка: «✅ Portals auth OK»
 ```
 
 `tma` истекает не мгновенно, но со временем протухает — health-check в начале каждого прогона
-объёма громко кричит в лог («❌ PORTALS AUTH DEAD»), если сессия умерла. Тогда повтори
-`npm run portals:login` и обнови Telegram Session в `/settings`.
+объёма громко кричит в лог («❌ PORTALS AUTH DEAD»), если сессия умерла. Тогда просто снова нажми
+**«Получить»** в `/settings` (или `npm run portals:login`), чтобы обновить Telegram Session.
 
 ## 5. Проверка end-to-end
 

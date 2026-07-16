@@ -94,8 +94,9 @@ export default async function VolumesPage({
         )}
         {telegramConfigured && authDead && (
           <p className="mt-4 max-w-xl rounded border border-amber-500/40 bg-amber-500/10 px-4 py-2 font-mono text-[11px] text-amber-600">
-            ⚠ Portals-авторизация протухла — обнови Telegram-сессию: <code>npm run portals:login</code> →
-            вставь новую сессию в <Link href="/settings" className="underline">Настройках</Link>.
+            ⚠ Portals-авторизация протухла — обнови Telegram-сессию: в{" "}
+            <Link href="/settings" className="underline">Настройках</Link> нажми «Получить» рядом с полем
+            «Telegram Session» и заново пройди вход (телефон + код).
           </p>
         )}
       </section>

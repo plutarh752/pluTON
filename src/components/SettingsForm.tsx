@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, KeyRound } from "lucide-react";
+import { Check, KeyRound, LogIn } from "lucide-react";
 import type { Field } from "@/lib/secrets";
+import { TelegramLoginDialog } from "./TelegramLoginDialog";
 
 // Форма ввода API-ключей: пустое поле при сабмите = «не менять», явная кнопка «очистить» = удалить
 // сохранённое значение. Плейнтекст секретов сюда приходит только из того, что сам пользователь набрал —
@@ -35,7 +36,7 @@ const FIELD_META: { field: Field; label: string; required?: boolean; multiline?:
     field: "telegramSession",
     label: "Telegram Session",
     multiline: true,
-    hint: "Сгенерируй локально: npm run portals:login → вставь результат сюда.",
+    hint: "Нажми «Получить» ниже (телефон + код из Telegram) — консоль не нужна. Либо вручную: npm run portals:login.",
   },
 ];
 
@@ -52,6 +53,13 @@ export function SettingsForm({ status, next }: { status: Record<Field, boolean>;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [showTgLogin, setShowTgLogin] = useState(false);
+
+  // Кнопка «Получить» для Telegram Session активна, когда API ID и API Hash доступны — уже сохранены ИЛИ
+  // только что набраны в форме (тогда они уйдут в БД вместе с полученной сессией на успехе входа).
+  const apiCredsReady =
+    (savedStatus.telegramApiId || !!values.telegramApiId?.trim()) &&
+    (savedStatus.telegramApiHash || !!values.telegramApiHash?.trim());
 
   function setValue(field: Field, v: string) {
     setValues((s) => ({ ...s, [field]: v }));
@@ -149,6 +157,35 @@ export function SettingsForm({ status, next }: { status: Record<Field, boolean>;
                   </button>
                 )}
               </div>
+              {field === "telegramSession" &&
+                (showTgLogin ? (
+                  <TelegramLoginDialog
+                    apiId={values.telegramApiId?.trim() || undefined}
+                    apiHash={values.telegramApiHash?.trim() || undefined}
+                    onClose={() => setShowTgLogin(false)}
+                    onLinked={() => {
+                      setSavedStatus((p) => ({
+                        ...p,
+                        telegramSession: true,
+                        telegramApiId: true,
+                        telegramApiHash: true,
+                      }));
+                      setValues((s) => ({ ...s, telegramSession: "" }));
+                      setCleared((s) => new Set([...s].filter((f) => f !== "telegramSession")));
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowTgLogin(true)}
+                    disabled={!apiCredsReady}
+                    title={apiCredsReady ? undefined : "Сначала заполни API ID и API Hash"}
+                    className="mt-2 flex items-center gap-2 rounded border border-outline-variant px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-on-surface-variant transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-outline-variant disabled:hover:text-on-surface-variant"
+                  >
+                    <LogIn size={14} />
+                    {isSet ? "Переподключить" : "Получить"}
+                  </button>
+                ))}
             </div>
           );
         })}

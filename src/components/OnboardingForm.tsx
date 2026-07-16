@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, KeyRound, Rocket, SkipForward } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, KeyRound, LogIn, Rocket, SkipForward } from "lucide-react";
 import type { Field } from "@/lib/secrets";
+import { TelegramLoginDialog } from "@/components/TelegramLoginDialog";
 import { OnboardingPlanet } from "@/components/onboarding/OnboardingPlanet";
 import { SerenityBackdrop } from "@/components/serenity/SerenityBackdrop";
 import { WordReveal } from "@/components/serenity/WordReveal";
@@ -56,7 +57,7 @@ const STEPS: Step[] = [
     field: "telegramSession",
     label: "Telegram Session",
     multiline: true,
-    hint: "Одноразовая строка сессии. Сгенерируй локально: npm run portals:login (потребуется ввести номер телефона и код из Telegram) → вставь результат сюда.",
+    hint: "Одноразовая строка сессии для вкладки «Объёмы». Нажми «Получить» ниже (телефон + код из Telegram) — консоль не нужна. Либо вручную: npm run portals:login → вставь результат сюда.",
   },
   { kind: "finish" },
 ];
@@ -76,8 +77,17 @@ export function OnboardingForm({ status, next }: { status: Record<Field, boolean
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [exploding, setExploding] = useState(false);
+  const [showTgLogin, setShowTgLogin] = useState(false);
+  const [tgLinked, setTgLinked] = useState(false);
 
   const current = STEPS[step];
+
+  // «Получить» доступна, когда API ID и Hash уже набраны на предыдущих шагах (или сохранены ранее) — они
+  // уйдут в БД вместе с полученной сессией. В онбординге сессия сохраняется сразу через диалог; значение
+  // поля остаётся пустым, а onFinish (POST /api/settings) на пустом telegramSession означает «не менять».
+  const apiCredsReady =
+    (savedStatus.telegramApiId || !!values.telegramApiId?.trim()) &&
+    (savedStatus.telegramApiHash || !!values.telegramApiHash?.trim());
 
   function setValue(field: Field, v: string) {
     setValues((s) => ({ ...s, [field]: v }));
@@ -192,7 +202,7 @@ export function OnboardingForm({ status, next }: { status: Record<Field, boolean
 
             <div className="mb-1 flex items-center gap-2">
               <label className="font-headline-md text-headline-md text-primary">{current.label}</label>
-              {savedStatus[current.field] && (
+              {(savedStatus[current.field] || (current.field === "telegramSession" && tgLinked)) && (
                 <span className="flex items-center gap-1 font-mono text-[10px] text-emerald-700 dark:text-emerald-400">
                   <Check size={12} /> настроено
                 </span>
@@ -219,6 +229,28 @@ export function OnboardingForm({ status, next }: { status: Record<Field, boolean
                 className={inputClass}
               />
             )}
+
+            {current.field === "telegramSession" &&
+              (showTgLogin ? (
+                <TelegramLoginDialog
+                  apiId={values.telegramApiId?.trim() || undefined}
+                  apiHash={values.telegramApiHash?.trim() || undefined}
+                  onClose={() => setShowTgLogin(false)}
+                  onLinked={() => {
+                    setTgLinked(true);
+                    setValues((s) => ({ ...s, telegramSession: "" }));
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => setShowTgLogin(true)}
+                  disabled={!apiCredsReady}
+                  title={apiCredsReady ? undefined : "Сначала заполни API ID и API Hash"}
+                  className="mt-3 flex items-center gap-2 rounded border border-outline-variant px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-on-surface-variant transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-outline-variant disabled:hover:text-on-surface-variant"
+                >
+                  <LogIn size={14} /> {tgLinked ? "Переподключить" : "Получить"}
+                </button>
+              ))}
 
             <div className="mt-8 flex items-center gap-3">
               <button

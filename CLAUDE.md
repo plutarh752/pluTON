@@ -33,9 +33,11 @@
 - `npm run worker:volume -- --period=24h|7d|30d [-- --force]` — один прогон «Получить объём» (Portals,
   движок вкладки «Объёмы»). Первым шагом — health-check Portals-авторизации (см. инвариант 9).
 - `npm run portals:health` — ручной health-check Portals-tma («✅ Portals auth OK» или громкий баннер + exit 1).
-- `npm run portals:login` — одноразовый интерактивный вход в Telegram (ввод телефона+кода ЛИЧНО) →
-  печатает session-строку для headless-минта tma; вставляется в `/settings` (не в `.env` — см. инв. 10).
-  `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` тоже вводятся там же (my.telegram.org).
+- **Основной путь получить `TELEGRAM_SESSION` — кнопка «Получить» в `/settings`** (мастер телефон→код→2FA
+  прямо в UI, консоль не нужна — см. инв. 12). `npm run portals:login` остаётся консольным ФОЛБЭКОМ:
+  одноразовый интерактивный вход в Telegram (ввод телефона+кода ЛИЧНО) → печатает session-строку для
+  headless-минта tma; вставляется в `/settings` (не в `.env` — см. инв. 10). `TELEGRAM_API_ID`/
+  `TELEGRAM_API_HASH` вводятся там же (my.telegram.org).
 - `npm run worker:scan [-- --force] [-- <address>]` — legacy tonapi-скан (каталог/on-chain/дельты, вне пути витрины).
 - `npm run db:seed` — сид settings + watchlist (идемпотентно).
 - `npm run onboarding:reset` / `onboarding:restore` — симуляция первого запуска (бэкап+чистка секретов и
@@ -166,8 +168,23 @@
      из dev-среды не проб'илась → поля коллекций/продаж парсим по кандидатам ключей, как giftSatellite;
      первый реальный прогон логирует `sample` — при расхождении поправить кандидаты).
    - **Health-check обязателен и громкий** (`assertPortalsAuth` в `src/lib/portals.ts`): при протухшем tma
-     печатает жирный баннер в терминал (обнови сессию → `npm run portals:login`) и роняет прогон ДО обхода
-     коллекций. Зовётся: первый шаг `worker/volume.ts`, `npm run portals:health`.
+     печатает жирный баннер в терминал и роняет прогон ДО обхода коллекций. Зовётся: первый шаг
+     `worker/volume.ts`, `npm run portals:health`.
+   - **⚠ ТЕКУЩАЯ ПОЛОМКА (2026-07-16, разбирается в новом диалоге): «Получить объём» падает не из-за
+     Telegram-сессии, а из-за DNS.** `npm run portals:health` → `Причина: authed probe failed: … curl: (6)
+     Could not resolve host: portals-market.com`. Проверено: **у хоста `portals-market.com` (его зовёт
+     `portalsmp`, база API из инв. 9) сейчас НЕТ A/AAAA-записи** — подтверждено авторитетно на его же
+     Cloudflare-NS (`dig @joyce.ns.cloudflare.com portals-market.com A` → пусто), и через 1.1.1.1/8.8.8.8.
+     Домен зарегистрирован (NS/SOA есть), но апекс и `www`/`api` без A. Общий интернет и минт tma (Telegram)
+     РАБОТАЮТ — падение чисто сетевое, к авторизации отношения не имеет. `portals.market`/`portalsmarket.com`
+     — чужие/припаркованные (Sedo `91.195.240.*`), НЕ подставлять вслепую. **Что нужно:** выяснить актуальный
+     хост/домен Portals (возможно, у них временный DNS-даун ИЛИ переезд) и обновить базу в `portalsmp`/
+     `src/lib/portals.ts`/`worker/portals_fetch.py`; ретест `npm run portals:health` до «✅ Portals auth OK».
+   - **ДЕФЕКТ рядом: health-check выдаёт ЛЮБОЙ провал Portals (в т.ч. DNS/сеть/Cloudflare) за «PORTALS AUTH
+     DEAD».** Из-за этого баннер `authDead` в `/volumes` и терминал-баннер шлют чинить Telegram-сессию, хотя
+     сессия жива. TODO (в новом диалоге): в `assertPortalsAuth`/сайдкаре различать сетевую ошибку
+     (DNS/timeout/curl (6)/(7)) от auth-ошибки (протухший tma) и показывать РАЗНЫЕ баннеры. Пока баннеры
+     обновлены только по формулировке (консоль → кнопка «Получить», инв. 12), различение не сделано.
    - **Контур — как «Получить цены»** (инв. 4/5): кнопка «Получить объём» + дропдаун периода (24h/7d/30d,
      выбор ДО запуска) → `POST /api/volume?period=` создаёт `VolumeRun{running,period}` СИНХРОННО (TOCTOU) →
      `triggerWorker("volume", runId, period)` → снапшот в `CollectionVolume` → read-only `/volumes` читает
@@ -187,7 +204,8 @@
      читает `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION` через `getTelegramCreds()` и
      подмешивает их в `env` при спавне `portals_fetch.py` (сам сайдкар не меняется). Локально нужен
      установленный Python 3 (`pip install -r requirements.txt`) — Node просто спавнит его напрямую,
-     отдельного деплоя/сервера не требуется.
+     отдельного деплоя/сервера не требуется. **`TELEGRAM_SESSION` получают кнопкой «Получить» в UI**
+     (мастер вместо консоли — инв. 12).
 
 10. **API-ключи хранятся зашифрованными в БД, НЕ в `.env`.** Проект шарится как папка с кодом — секреты в
     файлах утекли бы вместе с ней. `src/lib/secrets.ts`: одна строка `Setting{key:"secrets"}`, каждое из
@@ -275,6 +293,29 @@
       `/onboarding`); `npm run onboarding:restore` возвращает из бэкапа. `reset` отказывается работать, если
       бэкап уже есть (сначала `restore`). Скрипты — `scripts/onboarding-{reset,restore}.ts`.
 
+12. **`TELEGRAM_SESSION` получается кнопкой «Получить» прямо в `/settings` — консоль не нужна.** Обычному
+    пользователю недоступен терминал, поэтому `npm run portals:login` (инв. 9) переехал в UI-мастер (остаётся
+    консольным фолбэком). Полностью «в один клик» сессию выдать НЕЛЬЗЯ — Telegram шлёт код подтверждения в
+    приложение, его обязательно ввести вручную (+ облачный пароль при 2FA); мастер лишь переносит этот поток
+    из консоли в браузер.
+    - **Живой процесс входа обязателен между HTTP-запросами.** `phone_code_hash` из `send_code()` валиден
+      ТОЛЬКО на том же MTProto-соединении, что и `sign_in()` — поэтому один Python-процесс
+      (`worker/portals_login_interactive.py`, line-JSON протокол на stdin/stdout, `Client(in_memory=True)`)
+      держится живым весь мастер, а не спавнится заново на каждый шаг (в отличие от buffered
+      `runPortalsSidecar`). Реестр — module-level singleton активного логина в `src/lib/portalsLogin.ts`
+      (один вход за раз, TTL-kill 5 мин; local single-user — допустимо). Server-only (`node:child_process`);
+      клиент ходит туда ТОЛЬКО через роут (инв. 10).
+    - **Поток:** `POST /api/settings/telegram-login` с дискриминатором `action` (`start`→`send_code`,
+      `code`→`sign_in`, `password`→`check_password`, `cancel`→kill). Синхронный request/response (НЕ поллинг).
+      Клиент — `TelegramLoginDialog.tsx` (стейт-машина `phone→code→password?→done`), встроен в `SettingsForm`
+      и `OnboardingForm` рядом с полем «Telegram Session»; кнопка активна, когда API ID и Hash доступны
+      (сохранены ИЛИ набраны в форме — тогда уйдут в БД вместе с сессией).
+    - **Строка сессии НЕ возвращается клиенту** (инв. 10): на успехе роут пишет её (и API ID/Hash идемпотентно)
+      сразу в зашифрованную БД через `setSecrets()`, отдаёт клиенту только `{status, user}`; поле показывает
+      «✓ настроено». Пароль 2FA используется только для `check_password` (SRP) — не логируется, не хранится,
+      в session-строке его нет. Ошибки сайдкара нормализуются в дружелюбные коды
+      (`code_invalid`/`code_expired`/`password_invalid`/`session_expired`/…).
+
 ## Структура
 - `src/app/` — 3 основных экрана: `/` (Витрина — `page.tsx`, горизонтальные колонки-пресеты), `/presets`
   (Мои пресеты), `/volumes` (Объёмы — таблица рыночной статистики из Portals, инв. 9); плюс `/settings`
@@ -288,20 +329,24 @@
   union'ом, не заменяет; POST заполняет `previewImageUrl` арт'ом модели) + `api/presets/[id]/` (DELETE),
   `api/prices/` (триггер+статус), `api/volume/` (триггер+статус вкладки «Объёмы», `?period=`,
   409 `telegram_not_configured` без Telegram-кредов), `api/settings/` (GET статус/POST сохранение
-  ключей, инв. 10), `api/onboarding/` (POST — выставляет флаг онбординга, инв. 11), `api/scan/`
+  ключей, инв. 10) + `api/settings/telegram-login/` (POST `action`-мастер Telegram-входа, инв. 12),
+  `api/onboarding/` (POST — выставляет флаг онбординга, инв. 11), `api/scan/`
   (legacy-триггер). Серверные страницы: `force-dynamic` **+** `unstable_noStore()`.
 - **Вкладка «Объёмы» (инв. 9):** компоненты `GetVolumeButton` (кнопка+дропдаун периода, поллинг),
   `VolumeTable` (таблица, per-row бейдж `isPartial`); либы `portals.ts` (мост к Python-сайдкару +
-  health-check), `giftstat.ts` (keyless: blockchain_address + telegramId-фолбэк), `marketLinks.ts`,
-  `volumeRun.ts` (running-guard). Воркер `worker/volume.ts` + Python `worker/portals_fetch.py`
-  (осн. сбор) / `worker/portals_login.py` (одноразовый логин). Миграция таблиц — `scripts/migrate-volumes.ts`.
+  health-check), `portalsLogin.ts` (реестр живого процесса UI-входа, инв. 12), `giftstat.ts` (keyless:
+  blockchain_address + telegramId-фолбэк), `marketLinks.ts`, `volumeRun.ts` (running-guard). Воркер
+  `worker/volume.ts` + Python `worker/portals_fetch.py` (осн. сбор) / `worker/portals_login_interactive.py`
+  (UI-мастер входа, инв. 12) / `worker/portals_login.py` (консольный фолбэк). Миграция таблиц —
+  `scripts/migrate-volumes.ts`.
 - `src/components/` — витрина: `GetPricesButton` (триггер+поллинг, устойчив к смене вкладки через
   `visibilitychange`), `Showcase` (клиентская обёртка сетки: глобальная панель «Фильтр» — сортировка по цене
   + выбор площадок, localStorage; см. инв. 5), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/
   `LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
   `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); настройки: `SettingsForm`
-  (ввод/очистка API-ключей, инв. 10); первый запуск (инв. 11): `OnboardingForm` (полноэкранный пошаговый
+  (ввод/очистка API-ключей, инв. 10), `TelegramLoginDialog` (инлайн-мастер Telegram-входа телефон→код→2FA
+  рядом с полем «Telegram Session», инв. 12; в `SettingsForm` и `OnboardingForm`); первый запуск (инв. 11): `OnboardingForm` (полноэкранный пошаговый
   мастер: заставка → 5 шагов-полей со Skip/Next → «Готово»/«Финиш»; интегрирует планету/атмосферу/пословный
   текст, взрыв на «Финиш»), `WelcomeBackOverlay` (fixed-оверлей возврата, sessionStorage; фазовый
   таймлайн reveal→flyby); **анимации «Digital Serenity» + планета** (инв. 11) — `serenity/SerenityBackdrop`
@@ -324,8 +369,10 @@
   `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка по цветовой семье→тёмный→светлый),
   `format.ts` (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан, ключ через `secrets.ts`),
   `scoring.ts` (только статистика/редкость), `trigger.ts` (локальный spawn воркер-джобы),
+  `portalsLogin.ts` (server-only реестр живого процесса Telegram-входа для UI-мастера, инв. 12),
   `address.ts`, `usePrefersReducedMotion.ts` (клиентский хук — JS-гейт reduced-motion для анимаций инв. 11).
-- `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`.
+- `worker/` — `prices.ts` (движок витрины), `scan.ts` (legacy), `persist.ts`, `inferSales.ts`,
+  `portals_login_interactive.py` (line-JSON сайдкар UI-входа, инв. 12).
 - `prisma/` — `schema.prisma` (**14 моделей** + 6 enum; новые: `Preset` (`backdropNames String[]`, unique
   по `collectionName+modelName`), `PriceRun`, `MarketListing`, `VolumeRun` (`period`, `authOk`),
   `CollectionVolume` (`volumeTon`, `isPartial`, `topModels`); `ScanStatus` переиспользован для
@@ -339,8 +386,9 @@
   `TELEGRAM_*` в БД (инв. 10). Сами ключи вводятся ОДИН раз через `/settings` в приложении. Арт подарков
   (`changesTg.ts` → api.changes.tg) — **keyless**, ключа не требует; `CHANGES_TG_BASE_URL` опционально.
 - **Вкладка «Объёмы» (инв. 9) — Python-сайдкар локально:** `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/
-  `TELEGRAM_SESSION` — не переменные окружения, вводятся через `/settings`. `TELEGRAM_SESSION` генерится
-  одноразово `npm run portals:login` (ЛИЧНЫЙ ввод телефона+кода). tma истекает → health-check в начале
-  каждого прогона объёма кричит в лог. Нужен установленный Python 3 (`pip install -r requirements.txt`).
+  `TELEGRAM_SESSION` — не переменные окружения, вводятся через `/settings`. `TELEGRAM_SESSION` получают
+  кнопкой «Получить» прямо в `/settings` (мастер телефон→код→2FA, инв. 12); `npm run portals:login` —
+  консольный фолбэк. tma истекает → health-check в начале каждого прогона объёма кричит в лог. Нужен
+  установленный Python 3 (`pip install -r requirements.txt`) — в т.ч. для UI-мастера входа.
   Опц. тюнинг (env): `PORTALS_RUN_BUDGET_SEC` (деф. 540), `PORTALS_MAX_PAGES`, `PORTALS_THROTTLE_SEC`,
   `PYTHON_BIN`.

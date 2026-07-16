@@ -64,14 +64,15 @@ export async function assertPortalsAuth(): Promise<void> {
     const bar = "═".repeat(72);
     if (msg.startsWith("telegram_not_configured")) {
       console.error(
-        `\n${bar}\n⚠ TELEGRAM НЕ НАСТРОЕН — заполни API ID/Hash/Session в /settings.\n` +
-          `   Session сгенерируй локально: npm run portals:login\n${bar}\n`
+        `\n${bar}\n⚠ TELEGRAM НЕ НАСТРОЕН — заполни API ID/Hash в /settings и нажми «Получить»\n` +
+          `   рядом с полем «Telegram Session» (мастер телефон+код). Фолбэк: npm run portals:login\n${bar}\n`
       );
       throw new Error(msg);
     }
     console.error(
       `\n${bar}\n❌ PORTALS AUTH DEAD — обнови Telegram-сессию.\n` +
-        `   1) npm run portals:login → вставь новую сессию в /settings (Telegram Session)\n` +
+        `   1) в /settings нажми «Получить» у поля «Telegram Session» → пройди вход заново\n` +
+        `      (фолбэк из консоли: npm run portals:login → вставь сессию в /settings)\n` +
         `   2) перезапусти воркер / прогон «Получить объём»\n` +
         `   Причина: ${msg}\n${bar}\n`
     );
