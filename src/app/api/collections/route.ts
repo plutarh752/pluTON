@@ -1,30 +1,26 @@
 import { NextResponse } from "next/server";
-import { GiftSatellite, collectionFloorFromOffers, type GsCollectionOffers } from "@/lib/giftSatellite";
+import { giftstatCollections, giftstatFloorMap } from "@/lib/giftstat";
 import { cachedGs } from "@/lib/gsCache";
 import { getRates } from "@/lib/rates";
 
-// Каталог коллекций gift-satellite для dropdown «Коллекция» (кэш 6ч, stale-on-error).
-// Плюс floor каждой коллекции (одним запросом /history/collection-offers, уже кэш) + курсы — чтобы
-// dropdown сразу показывал «мин.цену» коллекции с ⭐/$ без доп. запросов на опцию.
+// Каталог коллекций Giftstat (keyless) для dropdown «Коллекция» (кэш 6ч, stale-on-error).
+// Плюс floor каждой коллекции (MIN по 4 площадкам Giftstat, кэш 10 мин) + курсы — чтобы dropdown сразу
+// показывал «мин.цену» коллекции с ⭐/$ без доп. запросов на опцию.
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const gs = new GiftSatellite();
-    const { data, stale } = await cachedGs("gs_cache:collections", 6 * 3600_000, () => gs.getCollections());
+    const { data, stale } = await cachedGs("gs_cache:collections", 6 * 3600_000, () => giftstatCollections());
 
     // floor по коллекциям — best-effort (не критично для списка).
     const floors: Record<string, number> = {};
     try {
-      const { data: offers } = await cachedGs<GsCollectionOffers[]>(
-        "gs_cache:offers",
+      const { data: floorMap } = await cachedGs<Record<string, number>>(
+        "giftstat_cache:floor_map",
         10 * 60_000,
-        () => gs.getCollectionOffers()
+        () => giftstatFloorMap()
       );
-      for (const o of offers) {
-        const f = collectionFloorFromOffers(o);
-        if (f != null) floors[o.collectionName] = f;
-      }
+      Object.assign(floors, floorMap);
     } catch {
       // floor'ы недоступны — покажем список без цен.
     }

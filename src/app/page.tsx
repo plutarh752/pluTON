@@ -5,7 +5,6 @@ import { Showcase, type ColumnData } from "@/components/Showcase";
 import { type BackdropSection } from "@/components/PresetColumn";
 import type { LotView } from "@/components/LotCard";
 import { sortBackdropsDarkToLight } from "@/lib/backdropColors";
-import { GiftSatellite } from "@/lib/giftSatellite";
 import { collectionIdMap } from "@/lib/giftPreviews";
 import { changesModelImageUrl } from "@/lib/changesTg";
 import { freshRunningRun } from "@/lib/priceRun";
@@ -48,7 +47,7 @@ export default async function Home() {
     : [];
 
   // telegramId по коллекциям → чистый арт модели (changes.tg) в заголовке столбца. Кэшировано, best-effort.
-  const idMap = await collectionIdMap(new GiftSatellite()).catch(() => ({}) as Record<string, string>);
+  const idMap = await collectionIdMap().catch(() => ({}) as Record<string, string>);
 
   // presetId → backdropName → лоты (упорядочены по цене возр. на уровне запроса).
   const byPreset = new Map<number, Map<string, LotView[]>>();

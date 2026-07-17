@@ -2,14 +2,19 @@
 
 **Персональный мультимаркетный трекер цен** на коллекционные Telegram-подарки (TON NFT). **Не бот, не
 фоновый сервис, не автоматический Deal Finder.** Пользователь один раз настраивает пресеты
-`Коллекция → Модель → [несколько Фонов]`, а по кнопке «Получить цены» видит по каждой модели **колонку**
-активных лотов **с разных площадок** (Telegram, Portals, Tonnel, MRKT, Getgems); внутри колонки — **секции
-по каждому выбранному фону** (сгруппированы по цвету, внутри семьи тёмный→светлый), с ценой в TON + ⭐Stars + gross `~$` и чипом `× от floor`
-(множитель к floor). Никакой формулы скоринга — просто «сколько стоит эта комбинация прямо сейчас на каждом
-маркете». Между прогонами — read-only витрина из БД.
+`Коллекция → Модель → [несколько Фонов]`, а по кнопке «Получить цены» видит по каждой модели **колонку** —
+ОДИН плоский список активных лотов **с разных площадок** (Telegram, Portals, Tonnel, MRKT, Getgems) по ВСЕМ
+выбранным фонам сразу, отсортированный по цене (фон каждого лота — бейдж на его карточке, не группировка
+секциями — см. инв. 5), с ценой в TON + ⭐Stars + gross `~$` и чипом `× от floor` (множитель к floor).
+Никакой формулы скоринга — просто «сколько стоит эта комбинация прямо сейчас на каждом маркете». Между
+прогонами — read-only витрина из БД.
 
 Полный план v2: `/Users/plutarh/.claude/plans/sorted-sleeping-sketch.md`. История v1 (Deal Finder) —
 в git и auto-memory `[[pluton-v2-giftsatellite]]`.
+
+## Язык общения
+Когда задача выполнена (итог/summary в конце работы) — отвечать **на русском**, независимо от языка
+предыдущих сообщений в диалоге.
 
 ## Подготовка к очистке диалога (перед `/clear`)
 Когда пользователь просит «подготовить диалог к очистке» (или похоже — «сохранись перед clear»), выполнить
@@ -56,44 +61,85 @@
      в Next 15 ключ переехал из `experimental.serverComponentsExternalPackages` на верхний уровень) —
      иначе ломается `ws` (`bufferUtil.mask is not a function`).
 
-2. **Источник новой механики — gift-satellite.dev (мультимаркет). tonapi — вспомогательный.**
-   `src/lib/giftSatellite.ts`: auth-заголовок **`Authorization: Token <GIFT_SATELLITE_KEY>` (НЕ Bearer)**;
-   ключ читается асинхронно из БД через `getGiftSatelliteKey()` (`src/lib/secrets.ts`), НЕ из
-   `process.env` — см. инв. 10. Базовый URL **`https://gift-satellite.dev/api`** (подтверждён probe'ом;
-   `api.gift-satellite.dev` НЕ резолвится; переопределяется `GIFT_SATELLITE_BASE_URL`, это остаётся
-   env-переменной). Per-endpoint троттлинг под лимиты: markets 2/s,
-   `tg` 1/1.5s, collection-offers 1/s, gift 4/s. Эндпоинты: `/gift/collections`, `/gift/collection/:name`
-   (модели/фоны для dropdown'ов), `/search/{tg,portals,tonnel,mrkt,getgems}/:collection?models=&backdrops=`
-   (≤50 лотов, `normalizedPrice` в TON), `/history/collection-offers` (floor по маркетам).
-   - **Имена коллекций/моделей/фонов в dropdown и в фильтре `/search` — из ОДНОГО источника (gift-satellite),
-     поэтому совпадают точно. Мешать с tonapi-атрибутами НЕЛЬЗЯ** (разное написание → 0 совпадений). Имена
-     коллекций С пробелами (`"Plush Pepe"`), `slug` — без (`PlushPepe-310`). Поля `link` в листинге нет.
-   - **Два источника картинок — не путать:** (a) **картинка ЛОТА** (конкретный экземпляр в колонке витрины)
-     выводится из slug (`giftImageUrl`): `https://nft.fragment.com/gift/<slug-lower>.medium.jpg` — это полный
-     рендер С реальным фоном лота (то что покупаешь); (b) **чистый арт МОДЕЛИ (без фона)** и **дефолтный вид
-     КОЛЛЕКЦИИ до апгрейда** — из **api.changes.tg** (`src/lib/changesTg.ts`), бесплатный keyless источник
-     официального арта Telegram-подарков. gift-satellite чистого арта НЕ отдаёт (probe: у моделей/фонов только
-     `{name, rarityPermille}`). **Джойн к changes.tg — по `telegramId` коллекции (его даёт gift-satellite),
-     НЕ по имени:** `<gift>` в эндпоинтах `/model/<id>/<model>.png` и `/original/<id>.png` принимает Telegram
-     gift id, что резолвит коллекции с расхождением имён (Castle → 400 по имени, 200 по id; Durov's Cap —
-     кудрявый апостроф). Имена МОДЕЛЕЙ у обоих источников из офиц. атрибутов Telegram → совпадают точно, модель
-     джойним по имени. **URL детерминированы и неизменны** — строятся без сети (кэш байтов у CDN/браузера),
-     `?size=64|128|256|512|1024`. Резолвер `collectionName→telegramId` (`collectionIdMap`/`collectionTelegramId`
-     в `giftPreviews.ts`) читает кэшированный каталог. Миниатюра модели в dropdown/арт столбца витрины/фото
-     пресета — `changesModelImageUrl`; миниатюра коллекции в dropdown — `changesOriginalImageUrl` (клиентом, без
-     запроса). `/api/model-previews` отдаёт арт КАЖДОЙ модели каталога (в т.ч. без листингов) + индикативную
-     мин.цену из `/search` (кэш неделя). Фото пресета (`Preset.previewImageUrl`) пишется на POST, но страницы
-     ПЕРЕСЧИТЫВАЮТ его на рендере из telegramId — старые stale-URL чинятся без миграции. floor коллекции для
-     dropdown — из `/history/collection-offers` (в `/api/collections`). При 404/отсутствии id — плейсхолдер
-     (graceful, `GiftImage.tsx`). **Атрибуция @GiftChanges в `Footer.tsx` обязательна** (условие changes.tg).
-   - **У фонов в API есть только `name` + `rarityPermille`, цвета/hex НЕТ** (probe). Цветные образцы фонов
-     берутся из захардкоженной палитры Telegram-фонов `src/lib/backdropColors.ts` (имя→центральный hex,
+2. **Источник каталога/floor — Giftstat (keyless, Слой А). Источник конкретных лотов под Модель+Фон —
+   gift-satellite.dev (платный ключ, Слой Б). Разделены сознательно — Giftstat принципиально не может
+   закрыть второе.**
+   - **Giftstat** (`src/lib/giftstat.ts`, `https://api.giftstat.app`, БЕЗ ключа/авторизации — CORS открыт,
+     10 запросов подряд не ловят 429) — основной источник каталога: `giftstatCollections()`
+     (`/current/collections` → имя+telegramId+`blockchain_address`; ~21% строк без имени — нессылочные
+     подарки без NFT-коллекции, отфильтрованы), `giftstatModelsAndBackdrops(collection)`
+     (`/current/collections/models`+`/backdrops`; сервер НЕ фильтрует по коллекции — параметр молча
+     игнорируется, тянем полные списки 7-8 тыс. строк ОДИН раз и группируем сами), `giftstatModelFloor
+     (collection)` (индикативный floor модели, блендед по фонам/площадкам, БЕЗ разбивки — `/current/
+     collections/models/floor`), `giftstatFloorMap()` (MIN floor коллекции по 4 площадкам —
+     `/current/collections/floor?marketplace=portals|tonnel|fragment|getgems`, каждая опрашивается
+     независимо, падение одной не роняет остальные). Все функции кэшируются через общий `cachedGs()`
+     (`gsCache.ts`, TTL+stale-on-error, источник-агностичный).
+   - **gift-satellite** (`src/lib/giftSatellite.ts`: auth-заголовок **`Authorization: Token
+     <GIFT_SATELLITE_KEY>` (НЕ Bearer)**; ключ асинхронно из БД через `getGiftSatelliteKey()`
+     (`src/lib/secrets.ts`), НЕ из `process.env` — см. инв. 10; базовый URL `https://gift-satellite.dev/api`,
+     переопределяется `GIFT_SATELLITE_BASE_URL`) сужен до ЕДИНСТВЕННОГО назначения: `searchMarket(market,
+     collection, {models,backdrops})` → `/search/{tg,portals,tonnel,mrkt,getgems}/:collection?models=
+     &backdrops=` (≤50 лотов, `normalizedPrice` в TON) — конкретные активные лоты (slug/giftId) под
+     комбинацию Модель+Фон. **Это единственное, чего Giftstat не отдаёт** (проверено пробами 4
+     гипотетических combo-путей → все 404; поля `backdrop` нет в `models/floor`) — используется ТОЛЬКО в
+     `worker/prices.ts` (ядро витрины). Плюс health-check валидности ключа в `api/settings/route.ts`
+     (`getCollections()` после сохранения). Per-endpoint троттлинг под лимиты: markets 2/s, `tg` 1/1.5s,
+     gift 4/s.
+   - **Набор площадок у двух источников РАЗНЫЙ, не 1:1** — Giftstat floor знает portals/tonnel/fragment/
+     getgems (нет tg/mrkt), `/search` знает tg/portals/tonnel/mrkt/getgems (нет fragment). Floor-чип
+     (Giftstat) и колонки витрины (`/search`) поэтому иногда расходятся в том, что считают «рынком» —
+     заведомое расхождение источников, не баг (по аналогии с инв.9 про объёмы — не «чинить»).
+   - **Гейт `requireGiftSatelliteConfigured` НЕ ослаблен**, хотя каталог/dropdown'ы/floor/валидация
+     пресетов technически больше не требуют ключа — сознательно отложено на будущую задачу онбординга
+     (см. инв. 10).
+   - Имена коллекций/моделей/фонов — из Giftstat, один источник и для dropdown, и для валидации пресетов
+     (консистентны между собой по построению). Имена коллекций С пробелами (`"Plush Pepe"`),
+     `collection_slug` — без. У моделей/фонов Giftstat отдаёт `{name, rarity}` → маппится в
+     `{name, rarityPermille}` (та же permille-конвенция, что раньше у gift-satellite).
+   - **Два источника картинок — не путать:** (a) **картинка ЛОТА** (конкретный экземпляр в колонке витрины,
+     из `/search` gift-satellite) выводится из slug (`giftImageUrl`):
+     `https://nft.fragment.com/gift/<slug-lower>.medium.jpg` — полный рендер С реальным фоном лота (то что
+     покупаешь); (b) **чистый арт МОДЕЛИ (без фона)** и **дефолтный вид КОЛЛЕКЦИИ до апгрейда** — из
+     **api.changes.tg** (`src/lib/changesTg.ts`), бесплатный keyless источник официального арта Telegram-
+     подарков. Ни Giftstat, ни gift-satellite чистого арта не отдают. **Джойн к changes.tg — по
+     `telegramId` коллекции (теперь даёт Giftstat: `str_id`/`id` из `/current/collections` — join-ключ
+     подтверждён пробой на 17 коллекциях вразброс по каталогу: `str_id` → `changes.tg/original/<id>.png` →
+     200 у всех 17; отрицательный контроль на случайном id → 400), НЕ по имени:** `<gift>` в эндпоинтах
+     `/model/<id>/<model>.png` и `/original/<id>.png` принимает Telegram gift id, что резолвит коллекции
+     с расхождением имён (Castle → 400 по имени, 200 по id; Durov's Cap — кудрявый апостроф). Имена МОДЕЛЕЙ
+     у обоих источников из офиц. атрибутов Telegram → совпадают точно (включая NBSP/кудрявые апострофы —
+     changes.tg отдаёт 200 в обоих написаниях, проверено на выборке), модель джойним по имени. **URL
+     детерминированы и неизменны** — строятся без сети (кэш байтов у CDN/браузера), `?size=64|128|256|512|
+     1024`. Резолвер `collectionName→telegramId` (`collectionIdMap`/`collectionTelegramId` в
+     `giftPreviews.ts`) читает кэшированный каталог Giftstat. Миниатюра модели в dropdown/арт столбца
+     витрины/фото пресета — `changesModelImageUrl`; миниатюра коллекции в dropdown —
+     `changesOriginalImageUrl` (клиентом, без запроса). `/api/model-previews` отдаёт арт КАЖДОЙ модели
+     каталога (в т.ч. без листингов) + индикативный floor модели из Giftstat (`giftstatModelFloor`).
+     Фото пресета (`Preset.previewImageUrl`) пишется на POST, но страницы ПЕРЕСЧИТЫВАЮТ его на рендере из
+     telegramId — старые stale-URL чинятся без миграции. floor коллекции для dropdown — из
+     `giftstatFloorMap()` (в `/api/collections`). При 404/отсутствии id — плейсхолдер (graceful,
+     `GiftImage.tsx`). **Атрибуция @GiftChanges в `Footer.tsx` обязательна** (условие changes.tg).
+   - **У фонов в API есть только `name` + `rarity`, цвета/hex НЕТ** (probe, оба источника). Цветные образцы
+     фонов берутся из захардкоженной палитры Telegram-фонов `src/lib/backdropColors.ts` (имя→центральный hex,
      сортировка **по цветовой семье (hue), внутри семьи тёмный→светлый по яркости** — одинаковые цвета
      идут рядом; ахроматичные серые/чёрные/белые — после цветных, неизвестное имя → серый fallback +
      название текстом). Общая `sortBackdropsDarkToLight` применяется во ВСЕХ местах (мультиселект формы,
      чипы пресетов, секции столбцов витрины) — чтобы порядок фонов был единым.
-   - **Каталог кэшируется** в `Setting`-строке (`gs_cache:*`, TTL 6ч) со **stale-on-error** — dropdown'ы не
-     бьются в rate limits и переживают падение источника (`src/lib/gsCache.ts`).
+   - **Два уровня кэша каталога — не путать.** (a) **МЕЛКИЕ per-collection/collection-list результаты**
+     (список коллекций, floor по коллекциям, атрибуты ОДНОЙ коллекции — то, что реально отдаётся клиенту)
+     кэшируются в `Setting`-строке (`gs_cache:*`, TTL 6ч, floor 10 мин) со stale-on-error через
+     `src/lib/gsCache.ts`. (b) **ТРИ ГЛОБАЛЬНЫХ списка ВНУТРИ `giftstat.ts`** (`/current/collections/models`
+     ~7355 строк, `/backdrops` ~8269, `/models/floor` ~7488 — их приходится тянуть целиком, см. выше) кэшируются
+     **В ПАМЯТИ процесса** (`memoCache` в `giftstat.ts`, TTL 6ч, с де-дупликацией параллельных запросов и
+     stale-on-error), **НЕ через `gsCache`/Postgres** — запись/чтение такого блоба (~1-2МБ JSON) ОДНОЙ строкой
+     через Neon HTTP-драйвер (инв.1) на практике оказалась медленной и ненадёжной (`prisma:error fetch
+     failed`, дропдаун «Модель» грузился ~5 минут на холодном кэше вместо ~1-2с — ловили на реальном прогоне
+     сразу после первого варианта миграции на Giftstat, не гипотетически). Раз процесс — единственный
+     долгоживущий локальный (инв.1, не serverless) — module-level `Map` корректна и НЕ теряется между
+     запросами в рамках одного `npm run dev`/прод-процесса; при рестарте — просто холодный кэш, не критично.
+     **Если добавляешь новый ГЛОБАЛЬНЫЙ (не per-collection) список из Giftstat — кэшируй его так же `memoCache`,
+     не `cachedGs`.**
    - **tonapi (`src/lib/tonapi.ts`) — только (a) курс `ton_usd` для $/⭐ и (b) legacy-скан** (см. инв. 8).
      Legacy-детали tonapi (raw→friendly адреса, `is_wallet`-фантомы, `marketUrl`) живут в `worker/scan.ts`
      и к витрине отношения не имеют.
@@ -136,18 +182,26 @@
    `priceStars/priceUsd/floorTon/floorDeviationPct`, пишет `MarketListing` под `runId`; статус/деградацию —
    в `PriceRun` (`marketStatus[presetId][market] = ok|failed` — degraded per-столбец/модель, НЕ по коллекции).
    Старые снапшоты чистятся (остаётся последний run). Витрина (`src/app/page.tsx`) читает последний `PriceRun`
-   + его `MarketListing`, группирует `presetId → backdropName` (столбец на модель, секции по фонам), собирает
-   сериализуемые `columns` и отдаёт их клиентскому `Showcase`.
+   + его `MarketListing`, группирует `presetId → backdropName` (`ColumnData.sections`, тип `BackdropSection[]`
+   в `PresetColumn.tsx`) и отдаёт сериализуемые `columns` клиентскому `Showcase`. **Эта группировка по фону —
+   ТОЛЬКО форма серверных данных**, дальше по пути она разворачивается в плоский список (см. ниже) — сам
+   `PresetColumn` секции по фону больше НЕ рендерит.
    - **Панель «Фильтр» (`src/components/Showcase.tsx`) — ГЛОБАЛЬНАЯ, чисто клиентская.** Одна кнопка-тулбар
      над сеткой (только когда есть пресеты) с поповером: (a) сортировка лотов по цене возр./убыв. и (b) 5
-     чекбоксов площадок вкл/выкл. Обе настройки применяются одинаково ко ВСЕМ колонкам/секциям разом через
-     `useMemo`-деривацию над уже загруженными лотами — **без запросов/API/БД** (фильтр/сортировка — это только
-     преобразование вида, данные не перезапрашиваются). Выбор помнится в `localStorage`
-     (`pluton:showcase-filter:v1`, гидрация в `useEffect` после монтирования → нет SSR-mismatch; дефолт = все
-     площадки, цена по возр.). Секция, опустевшая ИЗ-ЗА фильтра, показывает «Нет активных лотов» (колонки НЕ
-     прячем — стабильный layout). **Выбор направления сортировки закрывает поповер** (иначе на коротком столбце
-     панель перекрывает результат и кажется, что не применилось); чекбоксы площадок (мультивыбор) — не закрывают.
-     Degraded-колонки фильтр не затрагивает (меняет только `sections`, `degraded` пробрасывается нетронутым).
+     чекбоксов площадок вкл/выкл. `derived` (`useMemo`) для каждой колонки делает `sections.flatMap(s =>
+     s.lots)` → ОДИН плоский список лотов на колонку → фильтрует по площадкам → сортирует по цене ЦЕЛИКОМ,
+     БЕЗ учёта фона — **сортировка не сбрасывается на каждом новом фоне** (было именно так до этого — юзер
+     репортнул как баг: «сначала дешёвые лоты одного фона, потом опять с дешёвых — новый фон»; фикс —
+     убрали секции по фону из рендера совсем, фон каждого лота теперь бейдж с цветной точкой на самой
+     `LotCard` — `lot.backdropName`, colour из той же `backdropColor()`). Всё — **без запросов/API/БД**
+     (фильтр/сортировка — это только преобразование вида, данные не перезапрашиваются). Выбор помнится в
+     `localStorage` (`pluton:showcase-filter:v1`, гидрация в `useEffect` после монтирования → нет
+     SSR-mismatch; дефолт = все площадки, цена по возр.). Колонка, опустевшая ИЗ-ЗА фильтра, показывает «Нет
+     активных лотов» на весь столбец (НЕ по секциям — секций в рендере больше нет; колонки НЕ прячем —
+     стабильный layout). **Выбор направления сортировки закрывает поповер** (иначе на коротком столбце
+     панель перекрывает результат и кажется, что не применилось); чекбоксы площадок (мультивыбор) — не
+     закрывают. Degraded-колонки фильтр не затрагивает (`degraded` пробрасывается нетронутым, `lots` для
+     них не считается).
 
 6. **Graceful degradation обязателен.** Маркет вернул `[]` → нет лотов. Маркет упал (429/5xx/timeout) →
    `marketStatus[presetId][market]=failed`, лоты других маркетов показываем. **Все маркеты пресета/столбца
@@ -217,10 +271,11 @@
      времени прогона `PORTALS_RUN_BUDGET_SEC`). В таблице у таких строк — бейдж `TriangleAlert` с тултипом
      рядом с ячейкой объёма.
    - **Цены/floor/объём в TON всегда с `$`** (инв. 3): `LotPrice` со `stars=null`. Картинки коллекций —
-     `changesOriginalImageUrl` по telegramId (keyless, инв. 2); telegramId из `collectionIdMap`
-     (gift-satellite) с фолбэком на Giftstat. `blockchain_address` (ссылка на Getgems) — из keyless Giftstat
-     (`src/lib/giftstat.ts`). Ссылки на маркеты — `src/lib/marketLinks.ts` (надёжен per-collection только
-     Getgems по адресу; Portals/Fragment — вход в маркет).
+     `changesOriginalImageUrl` по telegramId (keyless, инв. 2); telegramId И `blockchain_address` (ссылка
+     на Getgems) — из ОДНОГО вызова `giftstatCollections()` (`src/lib/giftstat.ts`, инв. 2; раньше был
+     gift-satellite-first + Giftstat-фолбэк, теперь единственный источник, keyless). Ссылки на маркеты —
+     `src/lib/marketLinks.ts` (надёжен per-collection только Getgems по адресу; Portals/Fragment — вход
+     в маркет).
    - **Секреты Telegram — из БД, не из env** (см. инв. 10): `runPortalsSidecar()` в `src/lib/portals.ts`
      читает `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`/`TELEGRAM_SESSION` через `getTelegramCreds()` и
      подмешивает их в `env` при спавне `portals_fetch.py` (сам сайдкар не меняется). Локально нужен
@@ -243,8 +298,13 @@
       баннер-подсказка в ответе, сохранение не блокирует.
     - **Гейт — только `GIFT_SATELLITE_KEY`** (`src/lib/requireConfigured.ts`, framework-aware `redirect()`,
       поэтому НЕ в `secrets.ts`, который импортируют голые tsx-воркеры без Next-рантайма). Без него `/`,
-      `/presets`, `/volumes` редиректят на `/settings?next=...`. `TONAPI_KEY` опционален (free tier 1 RPS
-      работает без него), ничего не блокирует. Telegram-креды **тоже не блокируют вход** — их отсутствие
+      `/presets`, `/volumes` редиректят на `/settings?next=...`. **С инв.2 это строже, чем технически
+      необходимо** — каталог/dropdown'ы/floor/валидация пресетов уже не зависят от этого ключа (Giftstat,
+      keyless), нужен он только для лотов конкретной комбинации Модель+Фон (`searchMarket` в
+      `worker/prices.ts`). Гейт сознательно НЕ ослаблен в рамках этой задачи — отдельная будущая задача
+      онбординга должна перевернуть модель (ключ = опция, добавляющая данные, а не условие входа), а не
+      забытый недосмотр. `TONAPI_KEY` опционален (free tier 1 RPS работает без него), ничего не блокирует.
+      Telegram-креды **тоже не блокируют вход** — их отсутствие
       только отключает кнопку «Получить объём» (мягкий гейт: `isTelegramConfigured()` в
       `api/volume/route.ts` POST + `volumes/page.tsx`, amber-плашка со ссылкой на `/settings`), без
       редиректа. Это НЕ аутентификация приложения — гейт закрывает только «нет ключа», не «незнакомый
@@ -345,7 +405,7 @@
   навигации, редирект-цель гейта `requireOnboarded()`. Единая
   навигация: общий `TopNav`/`MobileNav` из `layout.tsx` на ВСЕХ страницах (бокового `SideNav` больше нет).
   API-роуты: `api/collections/` (список + floor + курсы) + `api/attributes/` (dropdown'ы из
-  gift-satellite, кэш), `api/model-previews/` (арт КАЖДОЙ модели из changes.tg + мин.цена из `/search`),
+  Giftstat, кэш), `api/model-previews/` (арт КАЖДОЙ модели из changes.tg + индикативный floor из Giftstat),
   `api/presets/` (GET/POST — upsert по коллекция+модель, повторное добавление **сливает** наборы фонов
   union'ом, не заменяет; POST заполняет `previewImageUrl` арт'ом модели) + `api/presets/[id]/` (DELETE),
   `api/prices/` (триггер+статус), `api/volume/` (триггер+статус вкладки «Объёмы», `?period=`,
@@ -356,16 +416,18 @@
 - **Вкладка «Объёмы» (инв. 9):** компоненты `GetVolumeButton` (кнопка+дропдаун периода, живой прогресс-бар/
   лог через `useRunPoller`+`RunProgress`, инв. 4),
   `VolumeTable` (таблица, per-row бейдж `isPartial`); либы `portals.ts` (мост к Python-сайдкару +
-  health-check), `portalsLogin.ts` (реестр живого процесса UI-входа, инв. 12), `giftstat.ts` (keyless:
-  blockchain_address + telegramId-фолбэк), `marketLinks.ts`, `volumeRun.ts` (running-guard). Воркер
+  health-check), `portalsLogin.ts` (реестр живого процесса UI-входа, инв. 12), `giftstat.ts` (каталог
+  Giftstat, инв. 2 — здесь только для telegramId+`blockchain_address`), `marketLinks.ts`,
+  `volumeRun.ts` (running-guard). Воркер
   `worker/volume.ts` + Python `worker/portals_fetch.py` (осн. сбор) / `worker/portals_login_interactive.py`
   (UI-мастер входа, инв. 12) / `worker/portals_login.py` (консольный фолбэк). Миграция таблиц —
   `scripts/migrate-volumes.ts`.
 - `src/components/` — витрина: `GetPricesButton` (триггер + живой прогресс-бар/лог через общий
   `useRunPoller`, устойчив к смене вкладки; инв. 4), `RunProgress` (презентационный бар+проценты+консоль-лог),
   `useRunPoller` (хук поллинга статуса+прогресса, refresh при завершении, cooldown),
-  `Showcase` (клиентская обёртка сетки: глобальная панель «Фильтр» — сортировка по цене
-  + выбор площадок, localStorage; см. инв. 5), `PresetColumn` (столбец=модель, секции по фонам)/`LotCard`/
+  `Showcase` (клиентская обёртка сетки: глобальная панель «Фильтр» — сортировка по цене ПЛОСКО по всей
+  колонке + выбор площадок, localStorage; см. инв. 5), `PresetColumn` (столбец=модель, один список лотов,
+  без секций по фону — см. инв. 5)/`LotCard` (карточка лота, в т.ч. бейдж фона — цветная точка + имя)/
   `LotPrice`/`FloorChip` (× к floor)/`GiftImage`; пресеты: `PresetForm` (каскад `CollectionSelect`→`ModelSelect`→
   `BackdropMultiSelect`; первые два — кастомные dropdown'ы с миниатюрами/мин.ценой, без панели превью),
   `PresetList` (удаление, фото модели через `GiftImage`, чипы-образцы фонов); настройки: `SettingsForm`
@@ -383,13 +445,16 @@
   атрибуция @GiftChanges).
 - `src/lib/` — `db.ts` (Prisma+Neon), `secrets.ts` (шифрование API-ключей в БД, инв. 10),
   `onboarding.ts` (флаг первого запуска + бэкфилл, инв. 11),
-  `requireConfigured.ts` (гейты `requireOnboarded`/`requireGiftSatelliteConfigured`), `giftSatellite.ts` (осн. источник, ключ через
-  `secrets.ts`), `markets.ts` (client-safe константы маркетов `Market`/`MARKETS`/`marketLabel` — без
+  `requireConfigured.ts` (гейты `requireOnboarded`/`requireGiftSatelliteConfigured`), `giftstat.ts`
+  (ОСНОВНОЙ источник каталога/моделей/фонов/floor — keyless, Слой А, инв. 2), `giftSatellite.ts` (сужен до
+  `searchMarket` — конкретные лоты Модель+Фон, платный ключ через `secrets.ts`, Слой Б, инв. 2),
+  `markets.ts` (client-safe константы маркетов `Market`/`MARKETS`/`marketLabel` — без
   `process.env`/сети/`node:crypto`; `giftSatellite` их РЕ-ЭКСПОРТИРУЕТ для серверных импортов, но
   клиентские компоненты берут их **напрямую отсюда**, не из `giftSatellite.ts` — см. инв. 10 про
-  client/server-границу), `gsCache.ts` (кэш каталога), `changesTg.ts` (детерм. URL арта модели/коллекции
-  из api.changes.tg по telegramId), `giftPreviews.ts` (резолвер `collectionName→telegramId` из
-  кэш-каталога + индикативная мин.цена модели из `/search`), `rates.ts` (курсы из settings),
+  client/server-границу), `gsCache.ts` (источник-агностичный TTL+stale-on-error кэш каталога),
+  `changesTg.ts` (детерм. URL арта модели/коллекции из api.changes.tg по telegramId), `giftPreviews.ts`
+  (резолвер `collectionName→telegramId` из кэш-каталога Giftstat + индикативный floor модели), `rates.ts`
+  (курсы из settings),
   `backdropColors.ts` (палитра фонов Telegram: имя→hex, сортировка по цветовой семье→тёмный→светлый),
   `format.ts` (TON+⭐+$, `formatFloorMultiple`), `tonapi.ts` (курс + legacy-скан, ключ через `secrets.ts`),
   `scoring.ts` (только статистика/редкость), `trigger.ts` (локальный spawn воркер-джобы),

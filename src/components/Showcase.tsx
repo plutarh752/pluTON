@@ -85,18 +85,19 @@ export function Showcase({ columns }: { columns: ColumnData[] }) {
 
   const enabledCount = MARKETS.filter((m) => enabled[m]).length;
 
-  // Применяем фильтр площадок + сортировку по цене к лотам КАЖДОЙ секции КАЖДОЙ колонки одинаково.
+  // Разворачиваем секции по фону в ОДИН плоский список лотов на колонку и сортируем/фильтруем его целиком —
+  // сортировка по цене должна работать по всей колонке, а не сбрасываться на каждом новом фоне (см. фон —
+  // теперь бейджем на самой карточке лота, LotCard.tsx). Секции остаются только как форма серверных данных
+  // (`ColumnData.sections`, group by backdrop из page.tsx) — сам порядок вывода их больше не использует.
   const derived = useMemo(
     () =>
       columns.map((c) => ({
         ...c,
-        sections: c.sections.map((s) => ({
-          ...s,
-          lots: s.lots
-            .filter((l) => enabled[l.market as Market] ?? true)
-            .slice()
-            .sort((a, b) => (sortDir === "asc" ? a.priceTon - b.priceTon : b.priceTon - a.priceTon)),
-        })),
+        lots: c.sections
+          .flatMap((s) => s.lots)
+          .filter((l) => enabled[l.market as Market] ?? true)
+          .slice()
+          .sort((a, b) => (sortDir === "asc" ? a.priceTon - b.priceTon : b.priceTon - a.priceTon)),
       })),
     [columns, enabled, sortDir],
   );
@@ -194,7 +195,7 @@ export function Showcase({ columns }: { columns: ColumnData[] }) {
             model={c.model}
             collection={c.collection}
             imageUrl={c.imageUrl}
-            sections={c.sections}
+            lots={c.lots}
             degraded={c.degraded}
           />
         ))}

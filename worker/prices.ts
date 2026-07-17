@@ -8,14 +8,8 @@ import "dotenv/config";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../src/lib/db";
 import { TonApi } from "../src/lib/tonapi";
-import {
-  GiftSatellite,
-  MARKETS,
-  collectionFloorFromOffers,
-  giftImageUrl,
-  parseNumberFromSlug,
-  type GsCollectionOffers,
-} from "../src/lib/giftSatellite";
+import { GiftSatellite, MARKETS, giftImageUrl, parseNumberFromSlug } from "../src/lib/giftSatellite";
+import { giftstatFloorMap } from "../src/lib/giftstat";
 import { tonToStars, tonToUsd, type Rates } from "../src/lib/format";
 import { marketLabel } from "../src/lib/markets";
 import { createProgress, clearRunProgress } from "../src/lib/progress";
@@ -100,14 +94,14 @@ async function main() {
 
   const gs = new GiftSatellite();
 
-  // floor по коллекциям (одним запросом; при ошибке — floor неизвестен, чипы просто не рисуем).
+  // floor по коллекциям — Giftstat, MIN по 4 площадкам (portals/tonnel/fragment/getgems); при ошибке —
+  // floor неизвестен, чипы просто не рисуем.
   await progress.update({ phase: "Floor коллекций…" }, true);
-  let offersByCollection = new Map<string, GsCollectionOffers>();
+  let floorByCollection: Record<string, number> = {};
   try {
-    const offers = await gs.getCollectionOffers();
-    offersByCollection = new Map(offers.map((o) => [o.collectionName, o]));
+    floorByCollection = await giftstatFloorMap();
   } catch (e) {
-    console.warn(`  ! collection-offers недоступны (floor неизвестен): ${(e as Error).message}`);
+    console.warn(`  ! Giftstat floor недоступен (floor неизвестен): ${(e as Error).message}`);
   }
 
   // все (пресет × маркет × фон) запросы; лимитер клиента держит интервалы per-market (маркеты параллельно).
@@ -160,7 +154,7 @@ async function main() {
     }
     marketStatus[pk][market] = "ok";
 
-    const floorTon = offersByCollection.has(col) ? collectionFloorFromOffers(offersByCollection.get(col)!) : null;
+    const floorTon = floorByCollection[col] ?? null;
     for (const l of res.value) {
       const priceTon = l.normalizedPrice;
       rows.push({

@@ -2,6 +2,7 @@ import { GiftImage } from "./GiftImage";
 import { LotPrice } from "./LotPrice";
 import { FloorChip } from "./FloorChip";
 import { marketLabel } from "@/lib/markets";
+import { backdropColor } from "@/lib/backdropColors";
 
 export interface LotView {
   id: number;
@@ -34,6 +35,18 @@ export function LotCard({ lot }: { lot: LotView }) {
           <span className="text-label-md uppercase tracking-widest text-on-surface-variant">Platform</span>
           <span className="font-mono text-body-md text-primary">{marketLabel(lot.market)}</span>
         </div>
+        {lot.backdropName && (
+          <div className="flex items-start justify-between">
+            <span className="text-label-md uppercase tracking-widest text-on-surface-variant">Фон</span>
+            <span className="flex items-center gap-1.5 font-mono text-body-md text-primary">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full border border-outline-variant"
+                style={{ backgroundColor: backdropColor(lot.backdropName) }}
+              />
+              {lot.backdropName}
+            </span>
+          </div>
+        )}
         <div className="flex items-end justify-between gap-2">
           <FloorChip pct={lot.floorDeviationPct} />
           <LotPrice ton={lot.priceTon} stars={lot.priceStars} usd={lot.priceUsd} />

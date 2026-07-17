@@ -2,7 +2,6 @@ import { unstable_noStore as noStore } from "next/cache";
 import { prisma } from "@/lib/db";
 import { PresetForm } from "@/components/PresetForm";
 import { PresetList } from "@/components/PresetList";
-import { GiftSatellite } from "@/lib/giftSatellite";
 import { collectionIdMap } from "@/lib/giftPreviews";
 import { changesModelImageUrl } from "@/lib/changesTg";
 import { requireGiftSatelliteConfigured, requireOnboarded } from "@/lib/requireConfigured";
@@ -19,8 +18,7 @@ export default async function PresetsPage() {
   // Фото пресета = чистый арт модели из changes.tg, считаем НА РЕНДЕРЕ по telegramId (детерминированно) —
   // старые пресеты со stale-URL (Fragment/случайный фон) чинятся автоматически без миграции. Фолбэк на
   // сохранённое значение, если каталог недоступен (id неизвестен).
-  const gs = new GiftSatellite();
-  const idMap = await collectionIdMap(gs).catch(() => ({}) as Record<string, string>);
+  const idMap = await collectionIdMap().catch(() => ({}) as Record<string, string>);
 
   // ACTIVE/STANDBY: есть ли по пресету лоты в последнем результативном прогоне.
   const lastRun = await prisma.priceRun.findFirst({

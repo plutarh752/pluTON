@@ -12,9 +12,7 @@ import "dotenv/config";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../src/lib/db";
 import { TonApi } from "../src/lib/tonapi";
-import { GiftSatellite } from "../src/lib/giftSatellite";
-import { collectionIdMap } from "../src/lib/giftPreviews";
-import { giftstatMetaMap, type CollectionMeta } from "../src/lib/giftstat";
+import { giftstatCollections } from "../src/lib/giftstat";
 import { assertPortalsAuth, fetchPortalsRun, type PortalsSale } from "../src/lib/portals";
 import { tonToUsd, type Rates } from "../src/lib/format";
 import { createProgress, clearRunProgress } from "../src/lib/progress";
@@ -137,12 +135,12 @@ async function main() {
   }
   const rates: Rates = { ton_usd: tonUsd, stars_usd: settings.rates?.stars_usd ?? 0.013 };
 
-  // 3) картинки/адреса коллекций: telegramId из кэша gift-satellite (как на витрине) + Giftstat как
-  //    фолбэк telegramId и источник blockchain_address (ссылка на Getgems). Оба best-effort.
+  // 3) картинки/адреса коллекций: telegramId + blockchain_address (ссылка на Getgems) из каталога Giftstat
+  //    (keyless, единственный источник теперь — раньше был gift-satellite-first + Giftstat-фолбэк).
+  //    Best-effort.
   await progress.update({ phase: "Каталог коллекций…" }, true);
-  const gs = new GiftSatellite();
-  const idMap = await collectionIdMap(gs).catch(() => ({}) as Record<string, string>);
-  const meta = await giftstatMetaMap().catch(() => ({}) as Record<string, CollectionMeta>);
+  const meta: Record<string, { telegramId: string; blockchainAddress?: string }> = {};
+  for (const c of await giftstatCollections().catch(() => [])) meta[c.name] = c;
 
   // 4) Portals: минт tma один раз, обход всех коллекций за окно периода (per-collection пагинация feed).
   //    Сайдкар шлёт per-collection прогресс (stderr `@P`) → живой прогресс-бар + лог в UI. Первый минт tma
@@ -176,7 +174,7 @@ async function main() {
     const lastSaleAt = lastSaleFrom(c.sales);
     rows.push({
       runId: run.id,
-      telegramId: idMap[c.name] ?? meta[c.name]?.telegramId ?? null,
+      telegramId: meta[c.name]?.telegramId ?? null,
       collectionName: c.name,
       floorTon: c.floorTon ?? null,
       volumeTon,

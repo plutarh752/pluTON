@@ -1,29 +1,31 @@
 import { PackageOpen, WifiOff } from "lucide-react";
 import { LotCard, type LotView } from "./LotCard";
 import { GiftImage } from "./GiftImage";
-import { backdropColor } from "@/lib/backdropColors";
 import { revealStyle } from "@/lib/reveal";
 
+// Форма "лоты, сгруппированные по фону" — строится на сервере (page.tsx) и разворачивается в плоский
+// список в Showcase.tsx перед сортировкой (см. коммент там). Секции сами по себе больше НЕ рендерятся —
+// сортировка по цене должна работать по всей колонке разом, а не сбрасываться на каждом новом фоне.
 export interface BackdropSection {
   backdropName: string;
   lots: LotView[];
 }
 
-// Колонка витрины = один пресет (Коллекция + Модель). Тело: секции по фонам (каждая — свои лоты) или
-// degraded (все маркеты пресета недоступны).
+// Колонка витрины = один пресет (Коллекция + Модель). Тело: один список лотов (сортировка/фильтр — в
+// Showcase.tsx, фон каждого лота — бейджем на самой карточке) или degraded (все маркеты пресета недоступны).
 export function PresetColumn({
   idx,
   model,
   collection,
   imageUrl,
-  sections,
+  lots,
   degraded,
 }: {
   idx: string;
   model: string;
   collection: string;
   imageUrl?: string | null;
-  sections: BackdropSection[];
+  lots: LotView[];
   degraded: boolean;
 }) {
   return (
@@ -48,34 +50,17 @@ export function PresetColumn({
             <p className="text-label-md uppercase tracking-widest text-on-surface-variant">Источник временно недоступен</p>
           </div>
         </div>
+      ) : lots.length === 0 ? (
+        <div className="flex flex-grow items-center justify-center gap-2 p-8 text-center">
+          <PackageOpen size={16} className="text-outline" />
+          <p className="font-mono text-[11px] text-on-surface-variant">Нет активных лотов</p>
+        </div>
       ) : (
-        <div className="flex-grow space-y-6 overflow-y-auto p-4">
-          {sections.map((s) => (
-            <section key={s.backdropName}>
-              <div className="mb-3 flex items-center gap-2 border-b border-outline-variant pb-2">
-                <span
-                  className="h-3.5 w-3.5 shrink-0 rounded-full border border-outline-variant"
-                  style={{ backgroundColor: backdropColor(s.backdropName) }}
-                  title={s.backdropName}
-                />
-                <span className="truncate text-label-md uppercase tracking-widest text-on-surface">{s.backdropName}</span>
-                <span className="ml-auto shrink-0 font-mono text-[10px] text-on-surface-variant">{s.lots.length}</span>
-              </div>
-              {s.lots.length === 0 ? (
-                <div className="flex items-center justify-center gap-2 py-4 text-center">
-                  <PackageOpen size={16} className="text-outline" />
-                  <p className="font-mono text-[11px] text-on-surface-variant">Нет активных лотов</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {s.lots.map((lot, i) => (
-                    <div key={lot.id} className="reveal" style={revealStyle(i)}>
-                      <LotCard lot={lot} />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
+        <div className="flex-grow space-y-4 overflow-y-auto p-4">
+          {lots.map((lot, i) => (
+            <div key={lot.id} className="reveal" style={revealStyle(i)}>
+              <LotCard lot={lot} />
+            </div>
           ))}
         </div>
       )}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { GiftSatellite } from "@/lib/giftSatellite";
+import { giftstatModelsAndBackdrops } from "@/lib/giftstat";
 import { cachedGs } from "@/lib/gsCache";
 import { collectionTelegramId } from "@/lib/giftPreviews";
 import { changesModelImageUrl } from "@/lib/changesTg";
@@ -31,12 +31,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
 
-  const gs = new GiftSatellite();
-
   // Валидация против атрибутов коллекции (если источник доступен; иначе создаём без валидации — graceful).
   try {
     const { data } = await cachedGs(`gs_cache:attrs:${collectionName}`, 6 * 3600_000, () =>
-      gs.getCollectionAttributes(collectionName)
+      giftstatModelsAndBackdrops(collectionName)
     );
     const hasModel = data.models.some((m) => m.name === modelName);
     const validBackdrops = new Set(data.backdrops.map((b) => b.name));
@@ -55,7 +53,7 @@ export async function POST(req: Request) {
   // страницы всё равно пересчитывают её на рендере, так что промах здесь не критичен.
   let previewImageUrl: string | null = null;
   try {
-    previewImageUrl = changesModelImageUrl(await collectionTelegramId(gs, collectionName), modelName);
+    previewImageUrl = changesModelImageUrl(await collectionTelegramId(collectionName), modelName);
   } catch {
     // каталог недоступен — оставим плейсхолдер.
   }
